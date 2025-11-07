@@ -38,7 +38,7 @@ const Sidebar = () => {
   return (
     <div>
       <div className="logo">
-        BOM Optimizer
+        SmartBOM
       </div>
       <Menu
         theme="dark"

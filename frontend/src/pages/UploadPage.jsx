@@ -323,14 +323,14 @@ const UploadPage = () => {
               <li>Excel or CSV format</li>
             </ul>
             
-            <h4>Troubleshooting:</h4>
+            {/* <h4>Troubleshooting:</h4>
             <ul>
               <li>Ensure files are not password protected</li>
               <li>Check that required columns exist</li>
               <li>Verify file is not corrupted</li>
               <li>Make sure backend server is running</li>
               <li>Check browser console for detailed errors</li>
-            </ul>
+            </ul> */}
           </Col>
         </Row>
       </Card>

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Tag, Progress, Row, Col, Alert, Button, Spin, Modal, message } from 'antd';
-import { DownloadOutlined, EyeOutlined, ClusterOutlined } from '@ant-design/icons';
+import { DownloadOutlined, EyeOutlined, ClusterOutlined, BarChartOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import ClusterChart from '../components/ClusterChart';
-import { getAnalysisResults, getWeldmentFiles, getBOMFiles } from '../services/api';
-import { useParams, useNavigate } from 'react-router-dom';
+import { getAnalysisResults, getWeldmentFiles } from '../services/api';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 const ResultsPage = () => {
   const [analysisResults, setAnalysisResults] = useState(null);
@@ -14,24 +14,28 @@ const ResultsPage = () => {
   const [weldmentData, setWeldmentData] = useState([]);
   const { analysisId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    loadAnalysisResults();
+    // Check if we have results passed via state (from AnalysisPage)
+    if (location.state?.analysisResults) {
+      setAnalysisResults(location.state.analysisResults);
+      setLoading(false);
+    } else if (analysisId) {
+      loadAnalysisResults();
+    } else {
+      setLoading(false);
+    }
     loadWeldmentData();
-  }, [analysisId]);
+  }, [analysisId, location.state]);
 
   const loadAnalysisResults = async () => {
     try {
       setLoading(true);
-      if (analysisId) {
-        // Fetch specific analysis results
-        const response = await getAnalysisResults(analysisId);
-        setAnalysisResults(response.data);
-      } else {
-        // For demo, try to load the latest analysis or show message
-        message.info('No analysis selected. Run an analysis first.');
-        navigate('/analysis');
-      }
+      console.log('Loading analysis results for ID:', analysisId);
+      const response = await getAnalysisResults(analysisId);
+      console.log('Analysis results received:', response.data);
+      setAnalysisResults(response.data);
     } catch (error) {
       console.error('Error loading analysis results:', error);
       message.error('Failed to load analysis results');
@@ -44,8 +48,8 @@ const ResultsPage = () => {
     try {
       const response = await getWeldmentFiles();
       if (response.data && response.data.length > 0) {
-        // Get the actual weldment data for visualization
-        // In a real app, you'd fetch the actual data points
+        // In a real app, you'd fetch the actual data points from the analysis
+        // For now, we'll use mock data that matches your file structure
         setWeldmentData([
           { assy_pn: 'A35631060', total_height_mm: 210.4, outer_dia_mm: 54.6 },
           { assy_pn: 'A35651785', total_height_mm: 210.4, outer_dia_mm: 50 },
@@ -79,14 +83,15 @@ const ResultsPage = () => {
 
   const handleExportClusters = () => {
     try {
-      if (!analysisResults?.clustering?.clusters) {
+      const clusters = analysisResults?.clustering?.clusters || [];
+      if (clusters.length === 0) {
         message.warning('No cluster data to export');
         return;
       }
 
       const csvContent = [
         ['Cluster ID', 'Member Count', 'Representative', 'Reduction Potential', 'Members'],
-        ...analysisResults.clustering.clusters.map(cluster => [
+        ...clusters.map(cluster => [
           cluster.cluster_id,
           cluster.member_count,
           cluster.representative,
@@ -191,17 +196,18 @@ const ResultsPage = () => {
     
     // Calculate overall reduction potential
     let reductionPotential = 0;
-    if (analysisResults.clustering?.clusters) {
-      const totalReduction = analysisResults.clustering.clusters.reduce(
-        (sum, cluster) => sum + cluster.reduction_potential, 0
+    const clusters = analysisResults.clustering?.clusters || [];
+    if (clusters.length > 0) {
+      const totalReduction = clusters.reduce(
+        (sum, cluster) => sum + (cluster.reduction_potential || 0), 0
       );
-      reductionPotential = totalReduction / analysisResults.clustering.clusters.length;
+      reductionPotential = Math.round((totalReduction / clusters.length) * 100);
     }
     
     return {
       totalClusters,
       similarPairs,
-      reductionPotential: Math.round(reductionPotential * 100)
+      reductionPotential
     };
   };
 
@@ -234,13 +240,16 @@ const ResultsPage = () => {
     );
   }
 
+  const hasClusteringResults = analysisResults.clustering?.clusters?.length > 0;
+  const hasBOMResults = analysisResults.bom_analysis?.similar_pairs?.length > 0;
+
   return (
     <div>
       <h1>Analysis Results</h1>
       
       <Alert
         message="Analysis Complete"
-        description="The dimensional clustering and BOM similarity analysis have been completed successfully."
+        description="The analysis has been completed successfully. Review the results below."
         type="success"
         showIcon
         style={{ marginBottom: 20 }}
@@ -266,6 +275,7 @@ const ResultsPage = () => {
             <Statistic
               title="Similar BOM Pairs"
               value={stats.similarPairs}
+              prefix={<BarChartOutlined />}
             />
           </Card>
         </Col>
@@ -280,70 +290,84 @@ const ResultsPage = () => {
         </Col>
       </Row>
 
-      <Row gutter={16}>
-        <Col span={12}>
-          <Card 
-            title="Weldment Clusters" 
-            extra={
-              <Button icon={<DownloadOutlined />} onClick={handleExportClusters}>
-                Export Clusters
-              </Button>
-            }
-          >
-            <Table
-              columns={clusterColumns}
-              dataSource={analysisResults.clustering?.clusters || []}
-              pagination={false}
-              size="small"
-              rowKey="cluster_id"
-              locale={{ emptyText: 'No clustering results available' }}
-            />
-          </Card>
-        </Col>
-        
-        <Col span={12}>
-          <Card title="Cluster Visualization">
-            <div className="cluster-visualization">
-              {weldmentData.length > 0 ? (
+      {hasClusteringResults ? (
+        <Row gutter={16}>
+          <Col span={12}>
+            <Card 
+              title="Weldment Clusters" 
+              extra={
+                <Button icon={<DownloadOutlined />} onClick={handleExportClusters}>
+                  Export Clusters
+                </Button>
+              }
+            >
+              <Table
+                columns={clusterColumns}
+                dataSource={analysisResults.clustering.clusters}
+                pagination={false}
+                size="small"
+                rowKey="cluster_id"
+              />
+            </Card>
+          </Col>
+          
+          <Col span={12}>
+            <Card title="Cluster Visualization">
+              <div className="cluster-visualization">
                 <ClusterChart 
                   data={weldmentData}
                   xKey="total_height_mm"
                   yKey="outer_dia_mm"
                 />
-              ) : (
-                <div style={{ textAlign: 'center', padding: '50px' }}>
-                  <p>No weldment data available for visualization</p>
-                </div>
-              )}
-            </div>
-          </Card>
-        </Col>
-      </Row>
-
-      {analysisResults.bom_analysis?.similar_pairs && analysisResults.bom_analysis.similar_pairs.length > 0 && (
-        <Card title="BOM Similarity Analysis" style={{ marginTop: 20 }}>
-          <Table
-            columns={similarityColumns}
-            dataSource={analysisResults.bom_analysis.similar_pairs}
-            pagination={false}
-            rowKey={(record) => `${record.bom_a}-${record.bom_b}`}
-          />
+              </div>
+            </Card>
+          </Col>
+        </Row>
+      ) : (
+        <Card title="Weldment Clusters" style={{ marginBottom: 20 }}>
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <p>No clustering results available. Run a dimensional clustering analysis to see clusters.</p>
+            <Button type="primary" onClick={() => navigate('/analysis')}>
+              Run Clustering Analysis
+            </Button>
+          </div>
         </Card>
       )}
 
-      {analysisResults.bom_analysis?.replacement_suggestions && 
-       analysisResults.bom_analysis.replacement_suggestions.length > 0 && (
-        <Card title="Replacement Suggestions" style={{ marginTop: 20 }}>
-          {analysisResults.bom_analysis.replacement_suggestions.map((suggestion, index) => (
-            <Alert
-              key={index}
-              message={suggestion.suggestion}
-              description={`Confidence: ${Math.round(suggestion.confidence * 100)}% | Potential Savings: ${suggestion.potential_savings} components`}
-              type="info"
-              showIcon
-              style={{ marginBottom: 10 }}
+      {hasBOMResults ? (
+        <>
+          <Card title="BOM Similarity Analysis" style={{ marginTop: 20 }}>
+            <Table
+              columns={similarityColumns}
+              dataSource={analysisResults.bom_analysis.similar_pairs}
+              pagination={false}
+              rowKey={(record) => `${record.bom_a}-${record.bom_b}`}
             />
-          ))}
+          </Card>
+
+          {analysisResults.bom_analysis.replacement_suggestions?.length > 0 && (
+            <Card title="Replacement Suggestions" style={{ marginTop: 20 }}>
+              {analysisResults.bom_analysis.replacement_suggestions.map((suggestion, index) => (
+                <Alert
+                  key={index}
+                  message={suggestion.suggestion}
+                  description={`Confidence: ${Math.round(suggestion.confidence * 100)}% | Potential Savings: ${suggestion.potential_savings} components`}
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 10 }}
+                />
+              ))}
+            </Card>
+          )}
+        </>
+      ) : (
+        <Card title="BOM Similarity Analysis" style={{ marginTop: 20 }}>
+          <div style={{ textAlign: 'center', padding: '20px' }}>
+            <p>No BOM similarity results available. Run a BOM analysis to see similarity comparisons.</p>
+            <Button type="primary" onClick={() => navigate('/analysis')}>
+              Run BOM Analysis
+            </Button>
+          </div>
         </Card>
       )}
 
