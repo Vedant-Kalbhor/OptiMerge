@@ -1,0 +1,21 @@
+bom-optimization-tool/
+├── backend/
+│   ├── app/
+│   │   ├── __init__.py
+│   │   ├── main.py
+│   │   ├── models.py
+│   │   ├── schemas.py
+│   │   ├── clustering.py
+│   │   ├── bom_analysis.py
+│   │   └── utils.py
+│   ├── requirements.txt
+│   └── uploads/
+└── frontend/
+    ├── public/
+    ├── src/
+    │   ├── components/
+    │   ├── pages/
+    │   ├── services/
+    │   └── utils/
+    ├── package.json
+    └── .env

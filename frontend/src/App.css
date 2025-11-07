@@ -1,0 +1,32 @@
+.app {
+  text-align: center;
+}
+
+.logo {
+  height: 32px;
+  margin: 16px;
+  background: rgba(255, 255, 255, 0.3);
+  text-align: center;
+  color: white;
+  font-weight: bold;
+  line-height: 32px;
+}
+
+.site-layout .site-layout-background {
+  background: #fff;
+}
+
+.ant-menu-item-selected {
+  background-color: #1890ff !important;
+}
+
+.analysis-section {
+  margin-bottom: 24px;
+}
+
+.results-container {
+  background: white;
+  padding: 24px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
