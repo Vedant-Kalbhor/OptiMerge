@@ -305,7 +305,7 @@ const ResultsPage = () => {
 
       {hasClusteringResults ? (
         <Row gutter={16}>
-          <Col span={12}>
+          <Col span={20}>
             <Card 
               title="Weldment Clusters" 
               extra={
@@ -324,7 +324,7 @@ const ResultsPage = () => {
             </Card>
           </Col>
           
-          <Col span={12}>
+          <Col span={20}>
             <Card title="Cluster Visualization">
               <div className="cluster-visualization">
                 {hasVisualizationData ? (
