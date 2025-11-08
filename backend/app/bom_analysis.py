@@ -54,7 +54,7 @@ def preprocess_bom_file(bom_df: pd.DataFrame) -> pd.DataFrame:
     
     return bom_df
 
-def analyze_bom_similarity(bom_df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_bom_similarity(bom_df: pd.DataFrame, threshold: float = 70.0) -> Dict[str, Any]:
     """
     Perform comprehensive BOM similarity analysis
     """
@@ -117,7 +117,7 @@ def analyze_bom_similarity(bom_df: pd.DataFrame) -> Dict[str, Any]:
             similarity_matrix[assy1][assy2] = round(similarity, 2)
             
             # Track similar pairs (similarity > 70%)
-            if i < j and similarity > 70:
+            if i < j and similarity > threshold:
                 common_components = list(set1.intersection(set2))
                 unique_to_assy1 = list(set1 - set2)
                 unique_to_assy2 = list(set2 - set1)
@@ -206,7 +206,7 @@ def generate_replacement_suggestions(similar_pairs: List[Dict], assembly_compone
     
     return suggestions
 
-def find_assembly_clusters(assemblies: List[str], similarity_matrix: Dict) -> List[List[str]]:
+def find_assembly_clusters(assemblies: List[str], similarity_matrix: Dict, threshold: float = 70.0) -> List[List[str]]:
     """Group assemblies into clusters based on similarity"""
     clusters = []
     used_assemblies = set()
@@ -219,7 +219,7 @@ def find_assembly_clusters(assemblies: List[str], similarity_matrix: Dict) -> Li
             # Find similar assemblies (similarity > 80%)
             for other_assembly in assemblies:
                 if (other_assembly not in used_assemblies and 
-                    similarity_matrix[assembly][other_assembly] > 80):
+        similarity_matrix[assembly][other_assembly] > threshold):
                     cluster.append(other_assembly)
                     used_assemblies.add(other_assembly)
             

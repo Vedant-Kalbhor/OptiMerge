@@ -82,7 +82,7 @@ def preprocess_bom_file(bom_df: pd.DataFrame) -> pd.DataFrame:
     print(f"Identified {bom_df[bom_df['is_assembly']]['assembly_id'].nunique()} unique assemblies")
     return bom_df
 
-def compute_bom_similarity(assembly_components: Dict[str, set]) -> Dict[str, Any]:
+def compute_bom_similarity(assembly_components: Dict[str, set], threshold: float) -> Dict[str, Any]:
     """Compute BOM similarity between assemblies"""
     assemblies = list(assembly_components.keys())
     num_assemblies = len(assemblies)
@@ -112,7 +112,7 @@ def compute_bom_similarity(assembly_components: Dict[str, set]) -> Dict[str, Any
             
             similarity_matrix[assy1][assy2] = round(similarity, 2)
             
-            if i < j and similarity > 70:
+            if i < j and similarity > threshold:
                 common_components = list(set1.intersection(set2))
                 unique_to_assy1 = list(set1 - set2)
                 unique_to_assy2 = list(set2 - set1)
@@ -216,7 +216,7 @@ def create_empty_bom_results() -> Dict[str, Any]:
         "clusters": []
     }
 
-def analyze_bom_data(bom_df: pd.DataFrame) -> Dict[str, Any]:
+def analyze_bom_data(bom_df: pd.DataFrame, threshold: float = 70.0) -> Dict[str, Any]:
     """Main BOM analysis function"""
     print("\n=== Starting BOM Analysis ===")
     
@@ -244,7 +244,7 @@ def analyze_bom_data(bom_df: pd.DataFrame) -> Dict[str, Any]:
         assembly_components[assembly] = components
     
     # Compute similarity
-    similarity_results = compute_bom_similarity(assembly_components)
+    similarity_results = compute_bom_similarity(assembly_components, threshold)
     
     # Generate additional results
     replacement_suggestions = generate_replacement_suggestions(similarity_results["similar_pairs"])
@@ -741,7 +741,9 @@ async def analyze_bom_similarity(request: dict):
         print(f"Assemblies found: {df['assembly_id'].unique()}")
         
         # Use the proper BOM analysis function
-        analysis_results = analyze_bom_data(df)
+        threshold_percent = threshold * 100
+        analysis_results = analyze_bom_data(df, threshold_percent)  # Pass the threshold
+
         
         analysis_id = generate_file_id()
         
