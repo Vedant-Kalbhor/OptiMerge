@@ -137,36 +137,96 @@ const ResultsPage = () => {
     },
   ];
 
-  const similarityColumns = [
-    {
-      title: 'BOM A',
-      dataIndex: 'bom_a',
-      key: 'bom_a',
+ const similarityColumns = [
+  {
+    title: 'BOM A',
+    dataIndex: 'bom_a',
+    key: 'bom_a',
+    width: 120,
+  },
+  {
+    title: 'BOM B',
+    dataIndex: 'bom_b',
+    key: 'bom_b',
+    width: 120,
+  },
+  {
+    title: 'Similarity Score',
+    dataIndex: 'similarity_score',
+    key: 'similarity_score',
+    width: 150,
+    render: (score) => (
+      <Progress 
+        percent={Math.round(score * 100)} 
+        size="small" 
+        status={score > 0.9 ? 'success' : score > 0.7 ? 'active' : 'exception'}
+      />
+    ),
+  },
+  {
+    title: 'Common Components',
+    dataIndex: 'common_components',
+    key: 'common_components',
+    render: (components) => {
+      // Handle both array and string formats
+      let componentList = [];
+      
+      if (Array.isArray(components)) {
+        componentList = components;
+      } else if (typeof components === 'string') {
+        // Try to split by spaces or create chunks
+        componentList = components.split(/\s+/).filter(comp => comp.length > 0);
+        if (componentList.length === 1 && componentList[0].length > 9) {
+          // If it's still one long string, split into chunks of 9 characters
+          componentList = components.match(/.{1,9}/g) || [];
+        }
+      }
+      
+      return (
+        <div style={{ maxWidth: '500px', maxHeight: '150px', overflow: 'auto' }}>
+          <div style={{ 
+            display: 'flex', 
+            flexWrap: 'wrap', 
+            gap: '4px',
+            padding: '4px',
+            border: '1px solid #f0f0f0',
+            borderRadius: '4px',
+            backgroundColor: '#fafafa'
+          }}>
+            {componentList.map((component, index) => (
+              <div
+                key={index}
+                style={{
+                  padding: '2px 6px',
+                  backgroundColor: '#e6f7ff',
+                  border: '1px solid #91d5ff',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  fontWeight: '500',
+                  color: '#0050b3',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                {component}
+              </div>
+            ))}
+          </div>
+          {componentList.length > 0 && (
+            <div style={{ 
+              fontSize: '10px', 
+              color: '#666', 
+              marginTop: '4px',
+              textAlign: 'center'
+            }}>
+              {componentList.length} common components
+            </div>
+          )}
+        </div>
+      );
     },
-    {
-      title: 'BOM B',
-      dataIndex: 'bom_b',
-      key: 'bom_b',
-    },
-    {
-      title: 'Similarity Score',
-      dataIndex: 'similarity_score',
-      key: 'similarity_score',
-      render: (score) => (
-        <Progress 
-          percent={Math.round(score * 100)} 
-          size="small" 
-          status={score > 0.9 ? 'success' : score > 0.7 ? 'active' : 'exception'}
-        />
-      ),
-    },
-    {
-      title: 'Common Components',
-      dataIndex: 'common_components',
-      key: 'common_components',
-    },
-  ];
-
+  },
+];
   // Calculate overall statistics
   const calculateStatistics = () => {
     if (!analysisResults) return { totalClusters: 0, similarPairs: 0, reductionPotential: 0 };

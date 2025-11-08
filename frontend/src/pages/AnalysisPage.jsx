@@ -302,7 +302,7 @@ const AnalysisPage = () => {
                   />
                 </Form.Item>
                 
-                <Form.Item
+                {/* <Form.Item
                   name="tolerance"
                   label="Tolerance"
                   help="Higher tolerance allows more variation within clusters"
@@ -317,7 +317,7 @@ const AnalysisPage = () => {
                       1: '1'
                     }}
                   />
-                </Form.Item>
+                </Form.Item> */}
 
                 <Form.Item>
                   <Button 
@@ -442,7 +442,7 @@ const AnalysisPage = () => {
       </Row>
 
       {/* Quick Actions Card */}
-      <Card title="Quick Actions" style={{ marginTop: 20 }}>
+      {/* <Card title="Quick Actions" style={{ marginTop: 20 }}>
         <Row gutter={16}>
           <Col span={8}>
             <Card
@@ -493,10 +493,10 @@ const AnalysisPage = () => {
             </Card>
           </Col>
         </Row>
-      </Card>
+      </Card> */}
 
       {/* Analysis Tips */}
-      <Card title="Analysis Tips" style={{ marginTop: 20 }}>
+      {/* <Card title="Analysis Tips" style={{ marginTop: 20 }}>
         <Row gutter={16}>
           <Col span={12}>
             <h4>Dimensional Clustering:</h4>
@@ -519,7 +519,7 @@ const AnalysisPage = () => {
             </ul>
           </Col>
         </Row>
-      </Card>
+      </Card> */}
 
       {/* Debug: Show raw results if available */}
       {analysisResults && process.env.NODE_ENV === 'development' && (
