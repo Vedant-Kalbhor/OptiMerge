@@ -38,7 +38,7 @@ const Sidebar = () => {
   return (
     <div>
       <div className="logo">
-        SmartBOM
+        OptiMerge 
       </div>
       <Menu
         theme="dark"

@@ -120,8 +120,6 @@
 // export default ClusterChart;
 
 
-
-
 import React from "react";
 import {
   ScatterChart,

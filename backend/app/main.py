@@ -1,3 +1,4 @@
+# main.py
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -83,8 +84,12 @@ def preprocess_bom_file(bom_df: pd.DataFrame) -> pd.DataFrame:
     print(f"Identified {bom_df[bom_df['is_assembly']]['assembly_id'].nunique()} unique assemblies")
     return bom_df
 
-def compute_bom_similarity(assembly_components: Dict[str, set], threshold: float) -> Dict[str, Any]:
-    """Compute BOM similarity between assemblies"""
+def compute_bom_similarity(assembly_components: Dict[str, Dict[str, float]], threshold: float) -> Dict[str, Any]:
+    """
+    Compute BOM similarity between assemblies, taking quantities into account.
+    assembly_components: { assembly_id: { component_name: quantity, ... }, ... }
+    threshold: percentage threshold (0-100) to include similar pairs
+    """
     assemblies = list(assembly_components.keys())
     num_assemblies = len(assemblies)
     
@@ -96,36 +101,68 @@ def compute_bom_similarity(assembly_components: Dict[str, set], threshold: float
     
     for i, assy1 in enumerate(assemblies):
         similarity_matrix[assy1] = {}
-        set1 = assembly_components[assy1]
+        comp_dict1 = assembly_components.get(assy1, {})
         
         for j, assy2 in enumerate(assemblies):
-            set2 = assembly_components[assy2]
+            comp_dict2 = assembly_components.get(assy2, {})
             
-            # Calculate Jaccard similarity - REMOVED the file reading code
-            if len(set1) == 0 and len(set2) == 0:
+            # If both empty
+            if not comp_dict1 and not comp_dict2:
                 similarity = 100.0
-            elif len(set1) == 0 or len(set2) == 0:
+            elif not comp_dict1 or not comp_dict2:
                 similarity = 0.0
             else:
-                intersection = len(set1.intersection(set2))
-                union = len(set1.union(set2))
-                similarity = (intersection / union) * 100
+                # Weighted (quantity-aware) intersection and union
+                all_components = set(comp_dict1.keys()).union(set(comp_dict2.keys()))
+                intersection_qty = 0.0
+                union_qty = 0.0
+                for comp in all_components:
+                    q1 = float(comp_dict1.get(comp, 0.0))
+                    q2 = float(comp_dict2.get(comp, 0.0))
+                    intersection_qty += min(q1, q2)
+                    union_qty += max(q1, q2)
+                
+                # Avoid division by zero
+                if union_qty == 0:
+                    similarity = 0.0
+                else:
+                    similarity = (intersection_qty / union_qty) * 100.0
             
             similarity_matrix[assy1][assy2] = round(similarity, 2)
             
+            # If pair (i<j) and crosses threshold, include details
             if i < j and similarity > threshold:
-                common_components = list(set1.intersection(set2))
-                unique_to_assy1 = list(set1 - set2)
-                unique_to_assy2 = list(set2 - set1)
+                # Build common_components as list of dicts with quantities
+                common_components = []
+                common_count = 0
+                common_quantity_total = 0.0
+                all_components = set(comp_dict1.keys()).union(set(comp_dict2.keys()))
+                for comp in all_components:
+                    q1 = float(comp_dict1.get(comp, 0.0))
+                    q2 = float(comp_dict2.get(comp, 0.0))
+                    if min(q1, q2) > 0:
+                        common_qty = min(q1, q2)
+                        common_components.append({
+                            "component": comp,
+                            "qty_a": q1,
+                            "qty_b": q2,
+                            "common_qty": common_qty
+                        })
+                        common_count += 1
+                        common_quantity_total += common_qty
+                
+                unique_to_assy1 = [c for c in comp_dict1.keys() if c not in comp_dict2]
+                unique_to_assy2 = [c for c in comp_dict2.keys() if c not in comp_dict1]
                 
                 similar_pairs.append({
                     "bom_a": assy1,
                     "bom_b": assy2,
                     "similarity_score": round(similarity / 100, 4),  # Scale to 0-1 for frontend
-                    "common_components": common_components,  # Limit for number of common components[:10]
+                    "common_components": common_components,  # list of objects {component, qty_a, qty_b, common_qty}
                     "unique_components_a": unique_to_assy1,
                     "unique_components_b": unique_to_assy2,
-                    "common_count": len(common_components),
+                    "common_count": common_count,
+                    "common_quantity_total": common_quantity_total,
                     "unique_count_a": len(unique_to_assy1),
                     "unique_count_b": len(unique_to_assy2)
                 })
@@ -144,11 +181,12 @@ def generate_replacement_suggestions(similar_pairs: List[Dict]) -> List[Dict]:
         assy_b = pair["bom_b"]
         similarity = pair["similarity_score"]
         
-        unique_a = pair["unique_count_a"]
-        unique_b = pair["unique_count_b"]
+        unique_a = pair.get("unique_count_a", 0)
+        unique_b = pair.get("unique_count_b", 0)
         total_unique = unique_a + unique_b
         
-        potential_savings = pair["common_count"]
+        # Use common_quantity_total as a better savings estimate
+        potential_savings = pair.get("common_quantity_total", pair.get("common_count", 0))
         
         suggestion = {
             "type": "bom_consolidation",
@@ -159,7 +197,8 @@ def generate_replacement_suggestions(similar_pairs: List[Dict]) -> List[Dict]:
             "confidence": similarity,
             "potential_savings": potential_savings,
             "details": {
-                "common_components": pair["common_count"],
+                "common_components": pair.get("common_count", 0),
+                "common_quantity_total": potential_savings,
                 "unique_to_a": unique_a,
                 "unique_to_b": unique_b
             }
@@ -237,14 +276,23 @@ def analyze_bom_data(bom_df: pd.DataFrame, threshold: float = 70.0) -> Dict[str,
         print("Need at least 2 assemblies for analysis")
         return create_empty_bom_results()
     
-    # Create component sets for each assembly
+    # Create component -> quantity dicts for each assembly
     assembly_components = {}
     for assembly in assemblies:
         assembly_data = component_df[component_df['assembly_id'] == assembly]
-        components = set(assembly_data['component'].tolist())
-        assembly_components[assembly] = components
+        # Sum quantities for identical component names
+        comp_qty = {}
+        for _, r in assembly_data.iterrows():
+            comp_name = str(r['component']).strip()
+            qty = r.get('quantity', 0.0)
+            try:
+                qty = float(qty) if not pd.isna(qty) else 0.0
+            except Exception:
+                qty = 0.0
+            comp_qty[comp_name] = comp_qty.get(comp_name, 0.0) + qty
+        assembly_components[assembly] = comp_qty
     
-    # Compute similarity
+    # Compute similarity (quantity-aware)
     similarity_results = compute_bom_similarity(assembly_components, threshold)
     
     # Generate additional results
@@ -408,11 +456,13 @@ def validate_bom_data(df: pd.DataFrame) -> pd.DataFrame:
     df = df.dropna(subset=['component'])
     df['lev'] = pd.to_numeric(df['lev'], errors='coerce')
     if 'quantity' in df.columns:
-        df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
+        df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
+    else:
+        df['quantity'] = 0
     
     # Convert numeric columns
     df['lev'] = pd.to_numeric(df['lev'], errors='coerce')
-    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
+    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0)
     
     # Add assembly ID for grouping if not present
     if 'assembly_id' not in df.columns:
@@ -718,7 +768,7 @@ async def analyze_bom_similarity(request: dict):
         
         # Use the proper BOM analysis function
         threshold_percent = threshold * 100
-        analysis_results = analyze_bom_data(df, threshold_percent)  # Pass the threshold
+        analysis_results_local = analyze_bom_data(df, threshold_percent)  # Pass the threshold
 
         
         analysis_id = generate_file_id()
@@ -727,9 +777,9 @@ async def analyze_bom_similarity(request: dict):
         analysis_results_store = {
             "type": "bom_analysis",
             "clustering": {
-                "clusters": analysis_results.get("clusters", []),
+                "clusters": analysis_results_local.get("clusters", []),
                 "metrics": {
-                    "n_clusters": len(analysis_results.get("clusters", [])),
+                    "n_clusters": len(analysis_results_local.get("clusters", [])),
                     "n_samples": len(df),
                     "silhouette_score": 0
                 },
@@ -737,10 +787,10 @@ async def analyze_bom_similarity(request: dict):
                 "numeric_columns": []
             },
             "bom_analysis": {
-                "similarity_matrix": analysis_results.get("similarity_matrix", {}),
-                "similar_pairs": analysis_results.get("similar_pairs", []),
-                "replacement_suggestions": analysis_results.get("replacement_suggestions", []),
-                "bom_statistics": analysis_results.get("bom_statistics", {})
+                "similarity_matrix": analysis_results_local.get("similarity_matrix", {}),
+                "similar_pairs": analysis_results_local.get("similar_pairs", []),
+                "replacement_suggestions": analysis_results_local.get("replacement_suggestions", []),
+                "bom_statistics": analysis_results_local.get("bom_statistics", {})
             }
         }
         

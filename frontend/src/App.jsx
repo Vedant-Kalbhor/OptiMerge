@@ -42,7 +42,7 @@ function App() {
                   alignItems: 'center'
                 }}
               >
-                <h2 style={{ margin: 0, color: '#1890ff' }}>BOM Optimization Tool</h2>
+                <h2 style={{ margin: 0, color: '#1890ff' }}>OptiMerge</h2>
               </Header>
               <Content style={{ margin: '20px', background: '#fff', padding: '20px', borderRadius: '8px' }}>
                 <Routes>

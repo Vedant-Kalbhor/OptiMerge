@@ -1,3 +1,4 @@
+// ResultsPage.jsx
 import React, { useState, useEffect } from 'react';
 import { Card, Table, Tag, Progress, Row, Col, Alert, Button, Spin, Modal, message } from 'antd';
 import { DownloadOutlined, EyeOutlined, ClusterOutlined, BarChartOutlined } from '@ant-design/icons';
@@ -167,59 +168,116 @@ const ResultsPage = () => {
     title: 'Common Components',
     dataIndex: 'common_components',
     key: 'common_components',
-    render: (components) => {
-      // Handle both array and string formats
+    render: (components, record) => {
+      /**
+       * New behavior:
+       * - If components is an array of objects like:
+       *    [{ component, qty_a, qty_b, common_qty }, ...]
+       *   show "component (A:qty_a, B:qty_b)" and a small badge for common_qty.
+       * - If components is an array of strings (legacy), show as before.
+       * - If components is a long string, split and display as before.
+       */
       let componentList = [];
-      
+      let totalCommonQty = null;
+
       if (Array.isArray(components)) {
         componentList = components;
       } else if (typeof components === 'string') {
         // Try to split by spaces or create chunks
         componentList = components.split(/\s+/).filter(comp => comp.length > 0);
         if (componentList.length === 1 && componentList[0].length > 9) {
-          // If it's still one long string, split into chunks of 9 characters
           componentList = components.match(/.{1,9}/g) || [];
         }
+      } else if (!components && record && record.common_components) {
+        // Fallback: sometimes backend sends common_components under record
+        componentList = record.common_components;
       }
-      
+
+      // If componentList is array-of-objects, collect total common qty if available
+      const isObjectList = componentList.length > 0 && typeof componentList[0] === 'object' && componentList[0] !== null;
+      if (isObjectList) {
+        totalCommonQty = componentList.reduce((s, c) => s + (c.common_qty || 0), 0);
+      }
+
       return (
         <div style={{ maxWidth: '500px', maxHeight: '150px', overflow: 'auto' }}>
           <div style={{ 
             display: 'flex', 
             flexWrap: 'wrap', 
-            gap: '4px',
-            padding: '4px',
+            gap: '6px',
+            padding: '6px',
             border: '1px solid #f0f0f0',
             borderRadius: '4px',
             backgroundColor: '#fafafa'
           }}>
-            {componentList.map((component, index) => (
-              <div
-                key={index}
-                style={{
-                  padding: '2px 6px',
-                  backgroundColor: '#e6f7ff',
-                  border: '1px solid #91d5ff',
-                  borderRadius: '12px',
-                  fontSize: '11px',
-                  fontFamily: 'monospace',
-                  fontWeight: '500',
-                  color: '#0050b3',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {component}
-              </div>
-            ))}
+            {componentList.map((component, index) => {
+              if (isObjectList) {
+                const name = component.component || 'unknown';
+                const qa = component.qty_a != null ? component.qty_a : '-';
+                const qb = component.qty_b != null ? component.qty_b : '-';
+                const common = component.common_qty != null ? component.common_qty : null;
+                return (
+                  <div
+                    key={index}
+                    style={{
+                      padding: '4px 8px',
+                      backgroundColor: '#e6f7ff',
+                      border: '1px solid #91d5ff',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontFamily: 'monospace',
+                      fontWeight: '500',
+                      color: '#0050b3',
+                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                    title={`A: ${qa} | B: ${qb}`}
+                  >
+                    <span style={{ marginRight: 6 }}>{name}</span>
+                    <span style={{ fontSize: 11, color: '#333' }}>(A:{qa}, B:{qb})</span>
+                    {common !== null && (
+                      <Tag style={{ marginLeft: 6 }} color="green">{common}</Tag>
+                    )}
+                  </div>
+                );
+              } else {
+                // legacy string or simple array of strings
+                const name = String(component);
+                return (
+                  <div
+                    key={index}
+                    style={{
+                      padding: '2px 6px',
+                      backgroundColor: '#e6f7ff',
+                      border: '1px solid #91d5ff',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontFamily: 'monospace',
+                      fontWeight: '500',
+                      color: '#0050b3',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {name}
+                  </div>
+                );
+              }
+            })}
           </div>
+
           {componentList.length > 0 && (
             <div style={{ 
-              fontSize: '10px', 
+              fontSize: '11px', 
               color: '#666', 
-              marginTop: '4px',
-              textAlign: 'center'
+              marginTop: '6px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
             }}>
-              {componentList.length} common components
+              <div>{componentList.length} common component{componentList.length > 1 ? 's' : ''}</div>
+              {totalCommonQty != null && <div>Total common quantity: <strong>{totalCommonQty}</strong></div>}
             </div>
           )}
         </div>
@@ -227,6 +285,7 @@ const ResultsPage = () => {
     },
   },
 ];
+
   // Calculate overall statistics
   const calculateStatistics = () => {
     if (!analysisResults) return { totalClusters: 0, similarPairs: 0, reductionPotential: 0 };
