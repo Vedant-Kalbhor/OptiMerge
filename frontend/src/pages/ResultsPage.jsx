@@ -485,7 +485,7 @@ const ResultsPage = () => {
           </Card>
 
           {analysisResults.bom_analysis.replacement_suggestions?.length > 0 && (
-            <Card title="Replacement Suggestions" style={{ marginTop: 20 }}>
+            <Card title="Replacement Suggestions " style={{ marginTop: 20 }}>
               {analysisResults.bom_analysis.replacement_suggestions.map((suggestion, index) => (
                 <Alert
                   key={index}

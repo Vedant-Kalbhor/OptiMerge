@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, Row, Col, Statistic, Table, Progress, Alert, Button, Spin } from 'antd';
 import { UploadOutlined, ClusterOutlined, BarChartOutlined, RocketOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { getWeldmentFiles, getBOMFiles, getAnalysisResults } from '../services/api';
+import { getWeldmentFiles, getBOMFiles, getAnalysisResults, getRecentAnalyses } from '../services/api';
 
 const Dashboard = () => {
   const [stats, setStats] = useState({
@@ -55,18 +55,22 @@ const Dashboard = () => {
   };
 
   const loadRecentAnalyses = async () => {
-    // In a real application, you'd have an endpoint to get recent analyses
-    // For now, we'll simulate this with local storage or show empty
-    const mockRecentAnalyses = [
-      {
-        id: 'analysis_001',
-        type: 'Dimensional Clustering',
-        date: new Date().toISOString().split('T')[0],
-        status: 'completed'
-      }
-    ];
-    setRecentAnalyses(mockRecentAnalyses);
-    setStats(prev => ({ ...prev, analyses: mockRecentAnalyses.length }));
+    try {
+      const response = await getRecentAnalyses();
+      const data = response.data || [];
+
+      const formatted = data.map(item => ({
+        id: item.id,
+        type: item.type,
+        date: item.date,
+        status: item.status
+      }));
+
+      setRecentAnalyses(formatted);
+      setStats(prev => ({ ...prev, analyses: formatted.length }));
+    } catch (err) {
+      console.error("Error loading previous analyses:", err);
+    }
   };
 
   const handleQuickAction = (action) => {
@@ -119,7 +123,8 @@ const Dashboard = () => {
         <Button 
           type="link" 
           size="small"
-          onClick={() => navigate(`/results/${record.id}`)}
+          // onClick={() => navigate(`/results/${record.id}`)}
+          onClick={() => navigate(`/previous/${record.id}`)}
         >
           View Results
         </Button>

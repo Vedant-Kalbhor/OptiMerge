@@ -144,4 +144,8 @@ export const healthCheck = async () => {
   }
 };
 
+export const getRecentAnalyses = async () => {
+  return api.get('/recent-analyses');
+};
+
 export default api;

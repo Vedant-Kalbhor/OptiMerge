@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard';
 import UploadPage from './pages/UploadPage';
 import AnalysisPage from './pages/AnalysisPage';
 import ResultsPage from './pages/ResultsPage';
+import PreviousAnalysisPage from "./pages/PreviousAnalysisPage";
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -50,7 +51,8 @@ function App() {
                   <Route path="/upload" element={<UploadPage />} />
                   <Route path="/analysis" element={<AnalysisPage />} />
                   <Route path="/results" element={<ResultsPage />} />
-                  <Route path="/results/:analysisId" element={<ResultsPage />} />
+                  <Route path="/results/:analysisId" element={<ResultsPage/>} />
+                  <Route path="/previous/:analysisId" element={<PreviousAnalysisPage/>} />
                 </Routes>
               </Content>
             </Layout>

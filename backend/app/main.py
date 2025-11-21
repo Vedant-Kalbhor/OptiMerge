@@ -1,4 +1,3 @@
-# main.py
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +14,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import silhouette_score
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn.decomposition import PCA
+from datetime import datetime
+from .db import analysis_collection 
+from bson import ObjectId
 
 app = FastAPI(title="BOM Optimization Tool", version="1.0.0")
 
@@ -736,7 +738,11 @@ async def analyze_dimensional_clustering(request: dict):
                 "replacement_suggestions": []
             }
         }
-
+        
+        
+        # ✅ SAVE TO MONGODB IMMEDIATELY
+        save_analysis_to_mongodb(analysis_id, "Dimensional Clustering", analysis_results[analysis_id])
+        
         return {
             "analysis_id": analysis_id,
             "clustering_result": analysis_results[analysis_id]["clustering"],
@@ -797,6 +803,12 @@ async def analyze_bom_similarity(request: dict):
         # Store in global analysis results
         analysis_results[analysis_id] = analysis_results_store
         
+        # Store in global analysis results
+        analysis_results[analysis_id] = analysis_results_store
+
+        # ✅ SAVE TO MONGODB IMMEDIATELY
+        save_analysis_to_mongodb(analysis_id, "BOM Similarity Analysis", analysis_results_store)
+        
         return {
             "analysis_id": analysis_id,
             "clustering_result": analysis_results_store["clustering"],
@@ -810,12 +822,61 @@ async def analyze_bom_similarity(request: dict):
         raise HTTPException(status_code=500, detail=f"BOM analysis failed: {str(e)}")
 
 @app.get("/analysis/{analysis_id}")
-async def get_analysis_results(analysis_id: str):
-    """Get analysis results by ID"""
-    if analysis_id not in analysis_results:
+async def get_analysis(analysis_id: str):
+    # Look by _id because your UUID is stored in _id
+    print(analysis_id)
+    analysis = analysis_collection.find_one({"id": analysis_id})
+    if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
+
+    # # convert from Mongo for JSON response
+    analysis["_id"] = str(analysis["_id"])
+
+    return analysis
+    # Look by _id because your UUID is stored in _id
+    print(analysis_id)
+    analysis = analysis_collection.find_one({"id": analysis_id})
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    # # convert from Mongo for JSON response
+    analysis["_id"] = str(analysis["_id"])
+
+    return analysis
+
+@app.get("/recent-analyses")
+async def recent_analyses():
+    docs = list(analysis_collection.find().sort("created_at", -1))
     
-    return analysis_results[analysis_id]
+    # Convert ObjectId to string
+    for d in docs:
+        d["_id"] = str(d["_id"])
+    
+    return docs
+
+def save_analysis_to_mongodb(analysis_id: str, analysis_type: str, result: dict):
+    """Save analysis result to MongoDB immediately after creation"""
+    try:
+        document = {
+            "id": analysis_id,
+            "type": analysis_type,
+            "date": datetime.utcnow().strftime("%Y-%m-%d"),
+            "status": "completed",
+            "raw": result,
+            "created_at": datetime.utcnow()
+        }
+        
+        analysis_collection.replace_one(
+            {"id": analysis_id},
+            document,
+            upsert=True
+        )
+        print(f"✅ Analysis {analysis_id} saved to MongoDB successfully")
+    except Exception as e:
+        print(f"❌ Error saving to MongoDB: {str(e)}")
+        # Don't raise exception - we still want to return results even if MongoDB fails
+        
+        
 
 @app.get("/")
 async def root():
