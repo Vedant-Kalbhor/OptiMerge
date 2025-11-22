@@ -137,7 +137,7 @@ const Dashboard = () => {
       <h1>Dashboard</h1>
       
       <Row gutter={16} style={{ marginBottom: 20 }}>
-        <Col span={6}>
+        <Col span={7}>
           <Card loading={loading}>
             <Statistic
               title="Weldment Files"
@@ -146,7 +146,7 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col span={7}>
           <Card loading={loading}>
             <Statistic
               title="BOM Files"
@@ -155,7 +155,7 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col span={7}>
           <Card>
             <Statistic
               title="Analyses"
@@ -164,7 +164,7 @@ const Dashboard = () => {
             />
           </Card>
         </Col>
-        <Col span={6}>
+        {/* <Col span={6}>
           <Card>
             <Statistic
               title="Potential Savings"
@@ -173,7 +173,7 @@ const Dashboard = () => {
               prefix={<ClusterOutlined />}
             />
           </Card>
-        </Col>
+        </Col> */}
       </Row>
 
       {stats.weldmentFiles === 0 && stats.bomFiles === 0 ? (
