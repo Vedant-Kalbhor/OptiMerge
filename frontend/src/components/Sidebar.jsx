@@ -28,11 +28,11 @@ const Sidebar = () => {
       icon: <BarChartOutlined />,
       label: 'Analysis',
     },
-    {
-      key: '/results',
-      icon: <ClusterOutlined />,
-      label: 'Results',
-    },
+    // {
+    //   key: '/results',
+    //   icon: <ClusterOutlined />,
+    //   label: 'Results',
+    // },
   ];
 
   return (

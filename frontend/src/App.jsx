@@ -5,7 +5,8 @@ import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
 import UploadPage from './pages/UploadPage';
 import AnalysisPage from './pages/AnalysisPage';
-import ResultsPage from './pages/ResultsPage';
+import ClusteringResultsPage from './pages/ClusteringResultsPage';
+import BOMResultsPage from './pages/BOMResultsPage';
 import PreviousAnalysisPage from "./pages/PreviousAnalysisPage";
 import './App.css';
 
@@ -23,8 +24,8 @@ function App() {
       <AntdApp>
         <Router>
           <Layout style={{ minHeight: '100vh' }}>
-            <Sider 
-              width={250} 
+            <Sider
+              width={250}
               breakpoint="lg"
               collapsedWidth="0"
               style={{
@@ -34,10 +35,10 @@ function App() {
               <Sidebar />
             </Sider>
             <Layout>
-              <Header 
-                style={{ 
-                  background: '#fff', 
-                  padding: '0 20px', 
+              <Header
+                style={{
+                  background: '#fff',
+                  padding: '0 20px',
                   borderBottom: '1px solid #f0f0f0',
                   display: 'flex',
                   alignItems: 'center'
@@ -50,8 +51,8 @@ function App() {
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/upload" element={<UploadPage />} />
                   <Route path="/analysis" element={<AnalysisPage />} />
-                  <Route path="/results" element={<ResultsPage />} />
-                  <Route path="/results/:analysisId" element={<ResultsPage/>} />
+                  <Route path="/results/clustering/:analysisId" element={<ClusteringResultsPage />} />
+                  <Route path="/results/bom/:analysisId" element={<BOMResultsPage />} />
                   <Route path="/previous/:analysisId" element={<PreviousAnalysisPage/>} />
                 </Routes>
               </Content>
