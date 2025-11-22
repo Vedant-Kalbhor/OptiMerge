@@ -1,18 +1,29 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Form, Input, Select, Button, Row, Col, message, Slider } from 'antd';
-import { PlayCircleOutlined } from '@ant-design/icons';
-import { getWeldmentFiles, getBOMFiles, analyzeDimensionalClustering, analyzeBOMSimilarity } from '../services/api';
+// src/pages/AnalysisPage.jsx
+import React, { useEffect, useState } from 'react';
+import {
+  Card, Form, Input, Select, Button, Row, Col, message, Slider, Table, Space
+} from 'antd';
+import { PlayCircleOutlined, RocketOutlined } from '@ant-design/icons';
+import {
+  getWeldmentFiles, getBOMFiles,
+  analyzeDimensionalClustering, analyzeBOMSimilarity, analyzeWeldmentPairwise
+} from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
 const { Option } = Select;
 
 const AnalysisPage = () => {
-  const [form] = Form.useForm();
-  const [bomForm] = Form.useForm();
+  const [form] = Form.useForm(); // clustering form
+  const [bomForm] = Form.useForm(); // bom similarity form
+  const [weldmentForm] = Form.useForm(); // weldment pairwise form
+
   const [weldmentFiles, setWeldmentFiles] = useState([]);
   const [bomFiles, setBomFiles] = useState([]);
+
   const [clusteringLoading, setClusteringLoading] = useState(false);
   const [bomLoading, setBomLoading] = useState(false);
+  const [weldmentLoading, setWeldmentLoading] = useState(false);
+
   const [analysisResults, setAnalysisResults] = useState(null);
   const navigate = useNavigate();
 
@@ -34,6 +45,7 @@ const AnalysisPage = () => {
     }
   };
 
+  // ----- Clustering handler (unchanged other than names) -----
   const onDimensionalAnalysis = async (values) => {
     try {
       setClusteringLoading(true);
@@ -45,11 +57,12 @@ const AnalysisPage = () => {
       setAnalysisResults(response.data);
       message.success('Dimensional analysis completed successfully');
 
-      // Navigate to clustering-only results page
+      // Navigate to clustering results page
       navigate(`/results/clustering/${response.data.analysis_id}`, {
         state: {
           analysisResults: {
-            clustering: response.data.clustering_result
+            clustering: response.data.clustering_result,
+            bom_analysis: response.data.bom_analysis_result
           }
         }
       });
@@ -62,6 +75,7 @@ const AnalysisPage = () => {
     }
   };
 
+  // ----- BOM similarity handler (unchanged) -----
   const onBOMAnalysis = async (values) => {
     try {
       setBomLoading(true);
@@ -73,10 +87,11 @@ const AnalysisPage = () => {
       setAnalysisResults(response.data);
       message.success('BOM analysis completed successfully');
 
-      // Navigate to BOM-only results page
+      // Navigate to BOM results page
       navigate(`/results/bom/${response.data.analysis_id}`, {
         state: {
           analysisResults: {
+            clustering: response.data.clustering_result,
             bom_analysis: response.data.bom_analysis_result
           }
         }
@@ -90,6 +105,46 @@ const AnalysisPage = () => {
     }
   };
 
+  // ----- NEW: Weldment Pairwise (one-to-one) handler -----
+  const onWeldmentComparison = async (values) => {
+    try {
+      setWeldmentLoading(true);
+      console.log('Starting weldment pairwise comparison with values:', values);
+
+      // Build payload expected by backend
+      const payload = {
+        weldment_file_id: values.weldment_file_id,
+        threshold: values.threshold ?? 0.3, // frontend slider is 0.1 - 1.0, backend accepts 0-1 or 0-100
+        tolerance: values.tolerance ?? 0.000001,
+        include_self: !!values.include_self
+      };
+
+      const response = await analyzeWeldmentPairwise(payload);
+      console.log('Weldment pairwise response:', response.data);
+
+      setAnalysisResults(response.data);
+      message.success('Weldment pairwise comparison completed successfully');
+
+      // Navigate to weldment results page
+      navigate(`/results/weldment/${response.data.analysis_id}`, {
+        state: {
+          analysisResults: {
+            weldment_pairwise: response.data.weldment_pairwise_result,
+            clustering: response.data.clustering_result,
+            bom_analysis: response.data.bom_analysis_result
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Weldment pairwise error:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Weldment comparison failed';
+      message.error(`Weldment comparison failed: ${errorMessage}`);
+    } finally {
+      setWeldmentLoading(false);
+    }
+  };
+
+  // helpers
   const hasWeldmentFiles = weldmentFiles.length > 0;
   const hasBomFiles = bomFiles.length > 0;
 
@@ -112,6 +167,7 @@ const AnalysisPage = () => {
       )}
 
       <Row gutter={16}>
+        {/* Dimensional Clustering */}
         <Col span={12}>
           <Card title="Dimensional Clustering Analysis" loading={clusteringLoading}>
             {!hasWeldmentFiles ? (
@@ -153,16 +209,8 @@ const AnalysisPage = () => {
                   </Select>
                 </Form.Item>
 
-                <Form.Item
-                  name="n_clusters"
-                  label="Number of Clusters (optional)"
-                  help="Leave empty for automatic cluster detection (2 ≤ k ≤ number of data points)"
-                >
-                  <Input
-                    type="number"
-                    min={2}
-                    placeholder="Auto-detect if empty"
-                  />
+                <Form.Item name="n_clusters" label="Number of Clusters (optional)" help="Leave empty for automatic detection">
+                  <Input type="number" min={2} placeholder="Auto-detect if empty" />
                 </Form.Item>
 
                 <Form.Item>
@@ -182,6 +230,7 @@ const AnalysisPage = () => {
           </Card>
         </Col>
 
+        {/* BOM Similarity */}
         <Col span={12}>
           <Card title="BOM Similarity Analysis" loading={bomLoading}>
             {!hasBomFiles ? (
@@ -228,11 +277,7 @@ const AnalysisPage = () => {
                     min={0.1}
                     max={1}
                     step={0.1}
-                    marks={{
-                      0.1: '0.1',
-                      0.5: '0.5',
-                      1: '1'
-                    }}
+                    marks={{ 0.1: '0.1', 0.5: '0.5', 1: '1' }}
                   />
                 </Form.Item>
 
@@ -254,17 +299,86 @@ const AnalysisPage = () => {
         </Col>
       </Row>
 
-      {/* Debug: Show raw results if available */}
-      {analysisResults && process.env.NODE_ENV === 'development' && (
-        <Card title="Raw Analysis Results (Debug)" style={{ marginTop: 20 }}>
-          <details>
-            <summary>Click to view raw API response</summary>
-            <pre style={{ fontSize: '10px', maxHeight: '300px', overflow: 'auto' }}>
-              {JSON.stringify(analysisResults, null, 2)}
-            </pre>
-          </details>
-        </Card>
-      )}
+      <Row gutter={16} style={{ marginTop: 16 }}>
+        {/* Weldment One-to-One Comparison */}
+        <Col span={12}>
+          <Card title="Weldment File One to One Comparison" loading={weldmentLoading}>
+            {!hasWeldmentFiles ? (
+              <div style={{ textAlign: 'center', padding: '20px' }}>
+                <p>No weldment files uploaded.</p>
+                <Button type="primary" onClick={() => navigate('/upload')}>
+                  Upload Weldment Files
+                </Button>
+              </div>
+            ) : (
+              <Form
+                form={weldmentForm}
+                layout="vertical"
+                onFinish={onWeldmentComparison}
+                initialValues={{
+                  threshold: 0.3,
+                  tolerance: 1e-6,
+                  include_self: false
+                }}
+              >
+                <Form.Item
+                  name="weldment_file_id"
+                  label="Weldment File"
+                  rules={[{ required: true, message: 'Please select a weldment file' }]}
+                >
+                  <Select placeholder="Select weldment file">
+                    {weldmentFiles.map(file => (
+                      <Option key={file.file_id} value={file.file_id}>
+                        {file.filename} ({file.record_count} records)
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+
+                <Form.Item name="threshold" label="Match Threshold (0.1 - 1.0)" help="Only pairs with match% >= threshold will be returned (0.1 = 10%)">
+                  <Slider
+                    min={0.1}
+                    max={1}
+                    step={0.1}
+                    marks={{ 0.1: '0.1', 0.5: '0.5', 1: '1' }}
+                  />
+                </Form.Item>
+
+                <Form.Item name="tolerance" label="Numeric Tolerance" help="Used for numeric comparisons (absolute) — smaller = stricter">
+                  <Input placeholder="e.g. 1e-6" />
+                </Form.Item>
+
+                <Form.Item name="include_self" label="Include self comparisons" valuePropName="checked">
+                  <Select>
+                    <Option value={false}>No</Option>
+                    <Option value={true}>Yes</Option>
+                  </Select>
+                </Form.Item>
+
+                <Form.Item>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<PlayCircleOutlined />}
+                    block
+                    size="large"
+                    loading={weldmentLoading}
+                  >
+                    Run Weldment One-to-One Comparison
+                  </Button>
+                </Form.Item>
+              </Form>
+            )}
+          </Card>
+        </Col>
+
+        {/* spare column for alignment */}
+        {/* <Col span={12}>
+          <Card title="Info">
+            <p>Run individual analyses separately. Results open in dedicated result pages.</p>
+          </Card>
+        </Col> */}
+      </Row>
     </div>
   );
 };

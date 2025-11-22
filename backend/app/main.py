@@ -354,6 +354,103 @@ def save_analysis_to_mongodb(analysis_id: str, analysis_type: str, result: dict)
         print(f"❌ Error saving to MongoDB: {str(e)}")
         # don't raise so API still returns results even if Mongo fails
 
+# --- add near other analyze endpoints in main.py ---
+
+@app.post("/analyze/weldment-pairwise/")
+async def analyze_weldment_pairwise(request: dict):
+    """
+    Perform one-to-one pairwise comparison on an uploaded weldment file.
+    Accepts:
+      - weldment_file_id (str) required
+      - tolerance (float) optional (defaults 1e-6)
+      - threshold (float) optional (0-1 or 0-100) filter for minimum match% (defaults 0.3)
+      - include_self (bool) optional (defaults False)
+      - columns_to_compare (list) optional
+    """
+    try:
+        weldment_file_id = request.get('weldment_file_id')
+        tolerance = float(request.get('tolerance', 1e-6))
+        threshold = request.get('threshold', 0.3)
+        include_self = bool(request.get('include_self', True))
+        columns_to_compare = request.get('columns_to_compare', None)
+
+        if weldment_file_id not in weldment_data:
+            raise HTTPException(status_code=404, detail="Weldment file not found")
+
+        df = weldment_data[weldment_file_id]["dataframe"]
+
+        # normalize threshold: if user sent 0-1 convert to 0-100
+        threshold_percent = float(threshold)
+        if threshold_percent <= 1.0:
+            threshold_percent = threshold_percent * 100.0
+
+        # Use pairwise comparison util
+        from .clustering_utils import pairwise_variant_comparison
+
+        result_df = pairwise_variant_comparison(
+            df,
+            key_col="assy_pn",
+            columns_to_compare=columns_to_compare,
+            tolerance=tolerance,
+            threshold=threshold_percent,
+            include_self=include_self
+        )
+
+        pairwise_records = []
+        if not result_df.empty:
+            for rec in result_df.to_dict(orient='records'):
+                pairwise_records.append({
+                    "bom_a": rec.get("Assembly A"),
+                    "bom_b": rec.get("Assembly B"),
+                    "match_percentage": float(rec.get("Match percentage") or 0.0),
+                    "matching_columns": rec.get("matching_cols_list") or [],
+                    "unmatching_columns": rec.get("unmatching_cols_list") or [],
+                    "matching_columns_letters": rec.get("Matching Columns") or "",
+                    "unmatching_columns_letters": rec.get("Unmatching") or ""
+                })
+
+        analysis_id = generate_file_id()
+        analysis_store = {
+            "type": "weldment_pairwise",
+            "clustering": {
+                "clusters": [],
+                "metrics": {"n_clusters": 0, "n_samples": len(df), "silhouette_score": 0},
+                "visualization_data": [],
+                "numeric_columns": []
+            },
+            "weldment_pairwise": {
+                "pairwise_table": pairwise_records,
+                "parameters": {
+                    "threshold_percent": threshold_percent,
+                    "tolerance": tolerance,
+                    "include_self": include_self
+                },
+                "statistics": {"pair_count": len(pairwise_records)}
+            },
+            "bom_analysis": {
+                "similar_pairs": [],
+                "replacement_suggestions": []
+            }
+        }
+
+        analysis_results[analysis_id] = analysis_store
+        save_analysis_to_mongodb(analysis_id, "Weldment Pairwise Comparison", analysis_store)
+
+        return {
+            "analysis_id": analysis_id,
+            "clustering_result": analysis_store["clustering"],
+            "weldment_pairwise_result": analysis_store["weldment_pairwise"],
+            "bom_analysis_result": analysis_store["bom_analysis"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("Weldment pairwise analysis error:", str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Weldment pairwise analysis failed: {str(e)}")
+
 
 @app.get("/")
 async def root():

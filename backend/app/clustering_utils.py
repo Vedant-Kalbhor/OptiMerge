@@ -6,6 +6,10 @@ from sklearn.metrics import silhouette_score
 from scipy.cluster.hierarchy import linkage, fcluster
 from sklearn.decomposition import PCA
 from typing import Dict, Any, Optional
+# Add the following imports at top of clustering_utils.py (if not already present)
+from typing import List, Tuple, Optional, Dict, Any
+import math
+import string
 
 import re
 
@@ -179,3 +183,197 @@ def perform_dimensional_clustering(
         "numeric_columns": numeric_cols
     }
 
+
+# -------------------------
+# Variant pairwise comparison helpers
+# -------------------------
+def _col_index_to_excel_letter(idx: int) -> str:
+    """
+    Convert 0-based column index to Excel style letters:
+    0 -> 'A', 1 -> 'B', ..., 25 -> 'Z', 26 -> 'AA', etc.
+    """
+    letters = []
+    n = idx + 1
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        letters.append(string.ascii_uppercase[rem])
+    return ''.join(reversed(letters))
+
+
+def _get_column_letter_map(df: pd.DataFrame) -> Dict[str, str]:
+    """
+    Returns mapping from df.columns (clean names) to Excel-letter codes
+    Example: {'assy_pn': 'A', 'total_height_of_packed_tower_mm': 'B', ...}
+    Based on column order.
+    """
+    return {col: _col_index_to_excel_letter(i) for i, col in enumerate(df.columns.tolist())}
+
+
+def _values_match(v1: Any, v2: Any, tol: float = 1e-6) -> bool:
+    """
+    Compare two values. If numeric-ish, compare with tolerance. Otherwise compare normalized strings.
+    Returns True if considered matching.
+    """
+    # Both NaN -> match
+    if (pd.isna(v1) and pd.isna(v2)):
+        return True
+
+    # If one is NaN and other is not -> not match
+    if pd.isna(v1) or pd.isna(v2):
+        return False
+
+    # Try numeric comparison
+    try:
+        f1 = float(v1)
+        f2 = float(v2)
+        return abs(f1 - f2) <= tol
+    except Exception:
+        # fallback to string equality (strip whitespace, lower)
+        s1 = str(v1).strip()
+        s2 = str(v2).strip()
+        return s1 == s2
+
+
+def compare_two_variants(
+    row_a: pd.Series,
+    row_b: pd.Series,
+    columns: List[str],
+    col_letter_map: Dict[str, str],
+    tolerance: float = 1e-6
+) -> Dict[str, Any]:
+    """
+    Compare two variant rows over the provided columns.
+    Returns dict with:
+      - 'bom_a', 'bom_b' (identifiers from row index or provided assembly columns),
+      - 'match_percentage' (float 0-100),
+      - 'matching_cols_letters' (comma separated letters),
+      - 'unmatching_cols_letters' (comma separated letters),
+      - 'matching_cols' (list of column names),
+      - 'unmatching_cols' (list of column names)
+    """
+    matching_cols = []
+    unmatching_cols = []
+
+    for col in columns:
+        v1 = row_a.get(col, np.nan)
+        v2 = row_b.get(col, np.nan)
+        if _values_match(v1, v2, tol=tolerance):
+            matching_cols.append(col)
+        else:
+            unmatching_cols.append(col)
+
+    total = len(columns)
+    if total == 0:
+        percent = 0.0
+    else:
+        percent = (len(matching_cols) / total) * 100.0
+
+    # map to letters
+    matching_letters = [col_letter_map.get(c, '?') for c in matching_cols]
+    unmatching_letters = [col_letter_map.get(c, '?') for c in unmatching_cols]
+
+    return {
+        "bom_a": row_a.to_dict().get("assy_pn", row_a.name),
+        "bom_b": row_b.to_dict().get("assy_pn", row_b.name),
+        "match_percentage": round(percent, 2),
+        "matching_cols_letters": ", ".join(matching_letters) if matching_letters else "",
+        "unmatching_cols_letters": ", ".join(unmatching_letters) if unmatching_letters else "",
+        "matching_cols": matching_cols,
+        "unmatching_cols": unmatching_cols
+    }
+
+
+def pairwise_variant_comparison(
+    df: pd.DataFrame,
+    key_col: str = "assy_pn",
+    columns_to_compare: Optional[List[str]] = None,
+    tolerance: float = 1e-6,
+    threshold: Optional[float] = None,
+    include_self: bool = False
+) -> pd.DataFrame:
+    """
+    Compare every variant (row) to every other variant in the DataFrame.
+
+    Parameters:
+      - df: validated weldment DataFrame (must contain key_col)
+      - key_col: column that identifies each variant (default 'assy_pn')
+      - columns_to_compare: list of column names to compare; if None, use all columns except the key_col
+      - tolerance: numeric match tolerance (absolute)
+      - threshold: if provided, filter pairs to only include those with match_percentage >= threshold (0-100)
+      - include_self: if True, include pair comparisons of a variant with itself (will be 100%)
+
+    Returns:
+      pandas.DataFrame with columns:
+        ['Assembly A', 'Assembly B', 'Match percentage', 'Matching Columns', 'Unmatching']
+      and internal columns 'matching_cols' and 'unmatching_cols' (lists) for programmatic use.
+    """
+    if key_col not in df.columns:
+        raise ValueError(f"Key column '{key_col}' not found in DataFrame")
+
+    # Decide which columns to compare
+    if columns_to_compare is None:
+        columns = [c for c in df.columns if c != key_col]
+    else:
+        # validate the provided columns
+        missing = [c for c in columns_to_compare if c not in df.columns]
+        if missing:
+            raise ValueError(f"Requested columns not present in DataFrame: {missing}")
+        columns = columns_to_compare.copy()
+
+    col_letter_map = _get_column_letter_map(df)
+
+    rows = []
+    # Use .itertuples or indexed approach to preserve order
+    df_indexed = df.reset_index(drop=True)
+
+    n = len(df_indexed)
+    for i in range(n):
+        for j in range(n):
+            if not include_self and i == j:
+                continue
+            # To avoid duplicates, only take i < j (user image appears to contain both directions? it shows A vs B once)
+            if i >= j:
+                continue
+
+            row_a = df_indexed.iloc[i]
+            row_b = df_indexed.iloc[j]
+            res = compare_two_variants(row_a, row_b, columns, col_letter_map, tolerance=tolerance)
+
+            # Apply threshold filter if requested
+            if threshold is None or res["match_percentage"] >= threshold:
+                rows.append(res)
+
+    result_df = pd.DataFrame(rows)
+
+    # Final formatting to match your screenshot column headers
+    if not result_df.empty:
+        formatted = pd.DataFrame({
+            "Assembly A": result_df["bom_a"],
+            "Assembly B": result_df["bom_b"],
+            "Match percentage": result_df["match_percentage"],
+            "Matching Columns": result_df["matching_cols_letters"],
+            "Unmatching": result_df["unmatching_cols_letters"],
+            # keep detailed lists for further processing if needed
+            "matching_cols_list": result_df["matching_cols"],
+            "unmatching_cols_list": result_df["unmatching_cols"]
+        })
+    else:
+        formatted = pd.DataFrame(columns=[
+            "Assembly A", "Assembly B", "Match percentage", "Matching Columns", "Unmatching",
+            "matching_cols_list", "unmatching_cols_list"
+        ])
+
+    return formatted
+
+
+# -------------------------
+# Example usage (callable from your main pipeline)
+# -------------------------
+# Example:
+#   df = parse_weldment_excel('/path/to/Sample weldment dimension file.xlsx')
+#   df_valid = validate_weldment_data(df)          # your existing validator
+#   # restrict to the 11 dimension columns if you want:
+#   columns_to_compare = [c for c in df_valid.columns if c != 'assy_pn']
+#   results_df = pairwise_variant_comparison(df_valid, key_col='assy_pn', columns_to_compare=columns_to_compare, tolerance=0.1, threshold=30)
+#   # results_df now matches the screenshot-like format and can be returned to frontend as JSON:
+#   results_json = results_df.to_dict(orient='records')

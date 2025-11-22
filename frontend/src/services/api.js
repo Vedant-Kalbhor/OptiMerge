@@ -148,4 +148,18 @@ export const getRecentAnalyses = async () => {
   return api.get('/recent-analyses');
 };
 
+export const analyzeWeldmentPairwise = async (data) => {
+  try {
+    console.log('Starting weldment pairwise analysis...');
+    const response = await api.post('/analyze/weldment-pairwise/', data);
+    return response;
+  } catch (error) {
+    console.error('Weldment pairwise analysis error:', error);
+    throw error;
+  }
+};
+
+
+
+
 export default api;

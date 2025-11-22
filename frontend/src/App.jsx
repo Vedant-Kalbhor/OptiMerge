@@ -8,6 +8,7 @@ import AnalysisPage from './pages/AnalysisPage';
 import ClusteringResultsPage from './pages/ClusteringResultsPage';
 import BOMResultsPage from './pages/BOMResultsPage';
 import PreviousAnalysisPage from "./pages/PreviousAnalysisPage";
+import WeldmentResultsPage from './pages/WeldmentResultsPage';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -54,6 +55,7 @@ function App() {
                   <Route path="/results/clustering/:analysisId" element={<ClusteringResultsPage />} />
                   <Route path="/results/bom/:analysisId" element={<BOMResultsPage />} />
                   <Route path="/previous/:analysisId" element={<PreviousAnalysisPage/>} />
+                  <Route path="/results/weldment/:analysisId" element={<WeldmentResultsPage />} />
                 </Routes>
               </Content>
             </Layout>

@@ -4,7 +4,7 @@ import {
   Card, Table, Tag, Progress, Row, Col, Alert, Button, Spin, Modal, message
 } from 'antd';
 import {
-  DownloadOutlined, EyeOutlined, ClusterOutlined, BarChartOutlined
+  DownloadOutlined, EyeOutlined, ClusterOutlined, BarChartOutlined, FileTextOutlined
 } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import ClusterChart from '../components/ClusterChart';
@@ -16,8 +16,10 @@ import { useParams, useNavigate } from 'react-router-dom';
  * - Loads saved analysis by ID and displays only relevant sections depending on analysis type:
  *   - "clustering" => Weldment Clusters, Cluster Visualization
  *   - "bom"        => BOM Similarity, Replacement Suggestions
- *   - "combined"   => Shows both
- * - Detects type from multiple possible fields returned by backend for robustness.
+ *   - "weldment_pairwise" => Weldment One-to-One Comparison table (pairwise)
+ *   - "combined"   => Shows both relevant sections
+ *
+ * Detection is robust to multiple backend field names and shapes.
  */
 
 const PreviousAnalysisPage = () => {
@@ -40,7 +42,7 @@ const PreviousAnalysisPage = () => {
       setLoading(true);
       const response = await getAnalysisResults(analysisId);
       const doc = response.data;
-      // Some backends nest under `raw`, some return top-level. Normalize to `raw`.
+      // Some backends nest under `raw`, some return top-level. Normalize
       const raw = doc?.raw ? doc.raw : doc;
       setAnalysisResults(raw);
     } catch (err) {
@@ -86,7 +88,7 @@ const PreviousAnalysisPage = () => {
     const clustersRaw = results?.clustering?.clusters || results?.clustering_result?.clusters || [];
     const clusters = normalizeClusters(clustersRaw);
     const totalClusters = results?.clustering?.metrics?.n_clusters ?? clusters.length;
-    const similarPairs = results?.bom_analysis?.similar_pairs?.length ?? results?.bom_analysis_result?.similar_pairs?.length ?? 0;
+    const similarPairs = results?.bom_analysis?.similar_pairs?.length ?? results?.bom_analysis_result?.similar_pairs?.length ?? results?.weldment_pairwise?.pairs?.length ?? results?.pairwise_results?.length ?? 0;
 
     let reductionPotential = 0;
     if (clusters.length > 0) {
@@ -118,9 +120,11 @@ const PreviousAnalysisPage = () => {
     const explicitType = results?.type || results?.analysis_type || results?.metadata?.type || results?.meta?.type;
     if (explicitType) {
       const t = explicitType.toString().toLowerCase();
-      if (t.includes('bom') && t.includes('cluster')) return 'combined';
+      if (t.includes('bom') && (t.includes('cluster') || t.includes('clustering'))) return 'combined';
       if (t.includes('bom')) return 'bom';
       if (t.includes('cluster') || t.includes('clustering') || t.includes('dimensional')) return 'clustering';
+      if (t.includes('pair') || t.includes('one-to-one') || t.includes('one_to_one') || t.includes('variant')) return 'weldment_pairwise';
+      if (t.includes('weldment') && t.includes('comparison')) return 'weldment_pairwise';
     }
 
     // Fallback: inspect content
@@ -132,9 +136,17 @@ const PreviousAnalysisPage = () => {
       (results?.bom_analysis && (results.bom_analysis.similar_pairs || results.bom_analysis.replacement_suggestions)) ||
       (results?.bom_analysis_result && (results.bom_analysis_result.similar_pairs || results.bom_analysis_result.replacement_suggestions))
     );
+    const hasPairwise = Boolean(
+      (results?.weldment_pairwise && (results.weldment_pairwise.pairs || results.weldment_pairwise.results)) ||
+      results?.pairwise_results ||
+      results?.pairwise ||
+      results?.variant_comparison ||
+      (Array.isArray(results?.pairwise_results) && results.pairwise_results.length > 0)
+    );
 
     if (hasClustering && hasBOM) return 'combined';
     if (hasClustering) return 'clustering';
+    if (hasPairwise) return 'weldment_pairwise';
     if (hasBOM) return 'bom';
     return 'unknown';
   };
@@ -211,6 +223,47 @@ const PreviousAnalysisPage = () => {
     } catch (error) {
       console.error(error);
       message.error('Failed to export BOM similarity');
+    }
+  };
+
+  const handleExportPairwise = () => {
+    try {
+      // Accept many shapes for pairwise list
+      const pairs =
+        analysisResults?.weldment_pairwise?.pairs ||
+        analysisResults?.pairwise_results ||
+        analysisResults?.pairwise ||
+        analysisResults?.variant_comparison ||
+        analysisResults?.pairwise_results?.pairs ||
+        [];
+
+      if (!pairs || pairs.length === 0) {
+        message.warning('No weldment pairwise data to export');
+        return;
+      }
+
+      const rows = [
+        ['Assembly A', 'Assembly B', 'Match %', 'Matching Letters', 'Matching Columns']
+      ];
+
+      for (const p of pairs) {
+        // Try multiple field names
+        const a = p.assembly_a ?? p.assemblyA ?? p.bom_a ?? p.bomA ?? p.bom_a ?? p.A ?? p.a ?? '';
+        const b = p.assembly_b ?? p.assemblyB ?? p.bom_b ?? p.bomB ?? p.b ?? '';
+        const matchPct = (p.match_percentage ?? p.match_percent ?? p.match_percent ?? p.match ?? p['Match percentage'] ?? 0);
+        const letters = p.matching_cols_letters ?? p.matching_letters ?? p.matching_cols ?? '';
+        const cols = Array.isArray(p.matching_cols) ? p.matching_cols.join('; ') : p.matching_cols_letters ?? p.matching_columns ?? '';
+
+        rows.push([a, b, `${matchPct}`, `"${letters}"`, `"${cols}"`]);
+      }
+
+      const csvContent = rows.map(r => r.join(',')).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      saveAs(blob, `weldment-pairwise-${analysisId || 'latest'}.csv`);
+      message.success('Weldment pairwise exported successfully');
+    } catch (error) {
+      console.error(error);
+      message.error('Failed to export weldment pairwise');
     }
   };
 
@@ -305,6 +358,50 @@ const PreviousAnalysisPage = () => {
     }
   ];
 
+  // New: Weldment pairwise columns (One-to-One)
+  const weldmentPairwiseColumns = [
+    {
+      title: 'Assembly A',
+      dataIndex: 'assembly_a',
+      key: 'assembly_a',
+      render: (val, rec) => val || rec.bom_a || rec.bomA || rec.a || '-'
+    },
+    {
+      title: 'Assembly B',
+      dataIndex: 'assembly_b',
+      key: 'assembly_b',
+      render: (val, rec) => val || rec.bom_b || rec.bomB || rec.b || '-'
+    },
+    {
+      title: 'Match %',
+      dataIndex: 'match_percentage',
+      key: 'match_percentage',
+      render: (val) => {
+        const pct = (val == null ? (val === 0 ? 0 : '') : val);
+        const percent = Number(pct) || 0;
+        return <div style={{ minWidth: 80 }}><Progress percent={Math.round(percent)} size="small" status={percent > 90 ? 'success' : percent > 50 ? 'active' : 'exception'} /></div>;
+      }
+    },
+    {
+      title: 'Matching (letters)',
+      dataIndex: 'matching_cols_letters',
+      key: 'matching_cols_letters',
+      render: (val) => <Tag color="blue">{val || '-'}</Tag>
+    },
+    {
+      title: 'Matching (columns)',
+      dataIndex: 'matching_cols',
+      key: 'matching_cols',
+      render: (val, rec) => {
+        // Could be a long string or array
+        let txt = '';
+        if (Array.isArray(val)) txt = val.join(', ');
+        else txt = val || rec.matching_columns || rec.matching_cols_letters || '';
+        return <div style={{ maxWidth: 450, whiteSpace: 'pre-wrap', fontFamily: 'monospace', fontSize: 12 }}>{txt}</div>;
+      }
+    }
+  ];
+
   // ---------- Render logic ----------
 
   if (loading) {
@@ -329,7 +426,7 @@ const PreviousAnalysisPage = () => {
     );
   }
 
-  const type = detectAnalysisType(analysisResults); // 'clustering' | 'bom' | 'combined' | 'unknown'
+  const type = detectAnalysisType(analysisResults); // 'clustering' | 'bom' | 'weldment_pairwise' | 'combined' | 'unknown'
   const clustersNormalized = normalizeClusters(analysisResults?.clustering?.clusters || analysisResults?.clustering_result?.clusters || []);
   const stats = calculateStatistics(analysisResults);
   const vizConfig = prepareVisualizationConfig(analysisResults);
@@ -341,25 +438,17 @@ const PreviousAnalysisPage = () => {
       <Row gutter={16} style={{ marginBottom: 18 }}>
         <Col span={8}>
           <Card>
-            <div style={{ fontSize: 18 }}>
-              <ClusterOutlined style={{ marginRight: 6 }} />
-              Clusters: {stats.totalClusters}
-            </div>
+            <div style={{ fontSize: 18 }}><ClusterOutlined style={{ marginRight: 6 }} />Clusters: {stats.totalClusters}</div>
           </Card>
         </Col>
         <Col span={8}>
           <Card>
-            <div style={{ fontSize: 18 }}>
-              <BarChartOutlined style={{ marginRight: 6 }} />
-              Similar BOM Pairs: {stats.similarPairs}
-            </div>
+            <div style={{ fontSize: 18 }}><BarChartOutlined style={{ marginRight: 6 }} />Similar BOM Pairs: {stats.similarPairs}</div>
           </Card>
         </Col>
         <Col span={8}>
           <Card>
-            <div style={{ fontSize: 18 }}>
-              Reduction Potential: {stats.reductionPotential}%
-            </div>
+            <div style={{ fontSize: 18 }}>Reduction Potential: {stats.reductionPotential}%</div>
           </Card>
         </Col>
       </Row>
@@ -429,6 +518,39 @@ const PreviousAnalysisPage = () => {
             </Card>
           )}
         </>
+      )}
+
+      {/* If analysis includes weldment pairwise comparison -> show pairwise UI */}
+      {(type === 'weldment_pairwise' || type === 'combined') && (
+        <Card title="Weldment One-to-One Comparison" style={{ marginTop: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <FileTextOutlined style={{ fontSize: 20, color: '#1890ff' }} />
+              <div>
+                <div style={{ fontSize: 18, fontWeight: '600' }}>{(analysisResults?.weldment_pairwise?.pairs || analysisResults?.pairwise_results || analysisResults?.pairwise || []).length || 0}</div>
+                <div style={{ color: '#666' }}>Pairs above threshold</div>
+              </div>
+            </div>
+
+            <div>
+              <Button style={{ marginRight: 8 }} icon={<DownloadOutlined />} onClick={handleExportPairwise}>Export Pairwise CSV</Button>
+              <Button onClick={() => message.info('Use the table to inspect pairwise comparison.')}>Help</Button>
+            </div>
+          </div>
+
+          <Table
+            columns={weldmentPairwiseColumns}
+            dataSource={
+              analysisResults?.weldment_pairwise?.pairs ||
+              analysisResults?.pairwise_results ||
+              analysisResults?.pairwise ||
+              analysisResults?.variant_comparison ||
+              []
+            }
+            pagination={false}
+            rowKey={(r, i) => `${r.assembly_a || r.bom_a || r.a || 'a'}-${r.assembly_b || r.bom_b || r.b || 'b'}-${i}`}
+          />
+        </Card>
       )}
 
       {/* Unknown type fallback */}
