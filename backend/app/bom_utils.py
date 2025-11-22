@@ -1,3 +1,4 @@
+# /mnt/data/bom_utils.py
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, List
@@ -112,9 +113,12 @@ def create_empty_bom_results() -> Dict[str, Any]:
 
 def compute_bom_similarity(assembly_components: Dict[str, Dict[str, float]], threshold: float) -> Dict[str, Any]:
     """
-    Compute BOM similarity between assemblies, taking quantities into account.
+    Compute BOM similarity between assemblies using STANDARD Jaccard on UNIQUE components.
+
+    J(A, B) = |components(A) ∩ components(B)| / |components(A) ∪ components(B)|
+
     assembly_components: { assembly_id: { component_name: quantity, ... }, ... }
-    threshold: percentage threshold (0-100)
+    threshold: percentage threshold (0-100) used to decide which pairs to keep
     """
     assemblies = list(assembly_components.keys())
     num_assemblies = len(assemblies)
@@ -122,70 +126,62 @@ def compute_bom_similarity(assembly_components: Dict[str, Dict[str, float]], thr
     if num_assemblies < 2:
         return create_empty_bom_results()
 
-    similarity_matrix = {}
-    similar_pairs = []
+    similarity_matrix: Dict[str, Dict[str, float]] = {}
+    similar_pairs: List[Dict[str, Any]] = []
 
     for i, assy1 in enumerate(assemblies):
-        similarity_matrix[assy1] = {}
         comp_dict1 = assembly_components.get(assy1, {})
+        set1 = set(comp_dict1.keys())
+        similarity_matrix[assy1] = {}
 
         for j, assy2 in enumerate(assemblies):
             comp_dict2 = assembly_components.get(assy2, {})
+            set2 = set(comp_dict2.keys())
 
-            # If both empty
-            if not comp_dict1 and not comp_dict2:
+            # --- Jaccard on unique components ---
+            if not set1 and not set2:
                 similarity = 100.0
-            elif not comp_dict1 or not comp_dict2:
+            elif not set1 or not set2:
                 similarity = 0.0
             else:
-                # Weighted (quantity-aware) intersection and union
-                all_components = set(comp_dict1.keys()).union(set(comp_dict2.keys()))
-                intersection_qty = 0.0
-                union_qty = 0.0
-                for comp in all_components:
-                    q1 = float(comp_dict1.get(comp, 0.0))
-                    q2 = float(comp_dict2.get(comp, 0.0))
-                    intersection_qty += min(q1, q2)
-                    union_qty += max(q1, q2)
+                inter = set1 & set2
+                union = set1 | set2
+                similarity = (len(inter) / len(union)) * 100.0
 
-                if union_qty == 0:
-                    similarity = 0.0
-                else:
-                    similarity = (intersection_qty / union_qty) * 100.0
+            similarity = round(similarity, 2)
+            similarity_matrix[assy1][assy2] = similarity
 
-            similarity_matrix[assy1][assy2] = round(similarity, 2)
-
+            # Only store each pair once (i < j) and above threshold
             if i < j and similarity > threshold:
-                # Build details including quantities
+                inter = set1 & set2  # recompute so we can reuse
+
+                # --- Build details, still using quantities like before ---
                 common_components = []
-                common_count = 0
                 common_quantity_total = 0.0
-                all_components = set(comp_dict1.keys()).union(set(comp_dict2.keys()))
-                for comp in all_components:
+                for comp in inter:
                     q1 = float(comp_dict1.get(comp, 0.0))
                     q2 = float(comp_dict2.get(comp, 0.0))
-                    if min(q1, q2) > 0:
-                        common_qty = min(q1, q2)
-                        common_components.append({
-                            "component": comp,
-                            "qty_a": q1,
-                            "qty_b": q2,
-                            "common_qty": common_qty
-                        })
-                        common_count += 1
-                        common_quantity_total += common_qty
+                    common_qty = min(q1, q2)
+                    common_components.append({
+                        "component": comp,
+                        "qty_a": q1,
+                        "qty_b": q2,
+                        "common_qty": common_qty
+                    })
+                    common_quantity_total += common_qty
 
-                unique_to_assy1 = [c for c in comp_dict1.keys() if c not in comp_dict2]
-                unique_to_assy2 = [c for c in comp_dict2.keys() if c not in comp_dict1]
+                unique_to_assy1 = sorted(list(set1 - set2))
+                unique_to_assy2 = sorted(list(set2 - set1))
 
                 similar_pairs.append({
                     "bom_a": assy1,
                     "bom_b": assy2,
-                    "similarity_score": round(similarity / 100, 4),
+                    # keep 0–1 similarity_score for frontend like before
+                    "similarity_score": round(similarity / 100.0, 4),
                     "common_components": common_components,
                     "unique_components_a": unique_to_assy1,
                     "unique_components_b": unique_to_assy2,
-                    "common_count": common_count,
+                    "common_count": len(common_components),
                     "common_quantity_total": common_quantity_total,
                     "unique_count_a": len(unique_to_assy1),
                     "unique_count_b": len(unique_to_assy2)
@@ -195,6 +191,7 @@ def compute_bom_similarity(assembly_components: Dict[str, Dict[str, float]], thr
         "similarity_matrix": similarity_matrix,
         "similar_pairs": similar_pairs
     }
+
 
 
 def generate_replacement_suggestions(similar_pairs: List[Dict], limit: int = 5) -> List[Dict]:

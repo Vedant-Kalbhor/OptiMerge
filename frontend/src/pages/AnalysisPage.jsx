@@ -331,6 +331,18 @@ const AnalysisPage = () => {
                     Run Dimensional Clustering
                   </Button>
                 </Form.Item>
+                {/* <Form.Item>
+                  <Button 
+                    type="primary" 
+                    htmlType="submit" 
+                    icon={<PlayCircleOutlined />}
+                    block
+                    size="large"
+                    loading={clusteringLoading}
+                  >
+                    Run One to One Comparison
+                  </Button>
+                </Form.Item> */}
               </Form>
             )}
           </Card>
