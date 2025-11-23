@@ -54,11 +54,11 @@ const WeldmentResultsPage = () => {
         ...rows.map(r => [
           `"${(r.bom_a || '').replace(/"/g, '""')}"`,
           `"${(r.bom_b || '').replace(/"/g, '""')}"`,
-          `${(r.match_percentage || 0).toFixed(2)}`,
+          `${(r.match_percentage || 0)}`,
           `"${(r.matching_columns_letters || '').replace(/"/g, '""')}"`,
           `"${(r.matching_columns || []).join('; ').replace(/"/g, '""')}"`,
           `"${(r.unmatching_columns_letters || '').replace(/"/g, '""')}"`
-        ].join(','))
+        ].join(',')) 
       ].join('\n');
 
       const blob = new Blob([csvRows], { type: 'text/csv;charset=utf-8;' });
@@ -74,9 +74,11 @@ const WeldmentResultsPage = () => {
     { title: 'Assembly A', dataIndex: 'bom_a', key: 'bom_a', render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span> },
     { title: 'Assembly B', dataIndex: 'bom_b', key: 'bom_b', render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span> },
     {
-      title: 'Match %', dataIndex: 'match_percentage', key: 'match_percentage', render: val => (
-        <Progress percent={Math.round((val || 0) * 100) / 100} size="small" format={(p) => `${p.toFixed(1)}%`} />
-      )
+      title: 'Match %', dataIndex: 'match_percentage', key: 'match_percentage', render: val => {
+        // DB stores percent values (90, 100). Progress expects 0-100.
+        const pct = Number(val) || 0;
+        return <Progress percent={Math.round(pct)} size="small" format={p => `${p.toFixed(1)}%`} />;
+      }
     },
     { title: 'Matching (letters)', dataIndex: 'matching_columns_letters', key: 'matching_columns_letters', render: v => <div style={{ fontFamily: 'monospace' }}>{v}</div> },
     { title: 'Matching (columns)', dataIndex: 'matching_columns', key: 'matching_columns', render: arr => (Array.isArray(arr) ? arr.map((c,i) => <Tag key={i}>{c}</Tag>) : null) }
