@@ -335,7 +335,8 @@ const AnalysisPage = () => {
                   </Select>
                 </Form.Item>
 
-                <Form.Item name="threshold" label="Match Threshold (0.1 - 1.0)" help="Only pairs with match% >= threshold will be returned (0.1 = 10%)">
+                {/* <Form.Item name="threshold" label="Match Threshold (0.1 - 1.0)" help="Only pairs with match% >= threshold will be returned (0.1 = 10%)"> */}
+                <Form.Item name="threshold" label="Match Threshold (0.1 - 1.0)">
                   <Slider
                     min={0.1}
                     max={1}
@@ -344,7 +345,7 @@ const AnalysisPage = () => {
                   />
                 </Form.Item>
 
-                <Form.Item name="tolerance" label="Numeric Tolerance" help="Used for numeric comparisons (absolute) — smaller = stricter">
+                {/* <Form.Item name="tolerance" label="Numeric Tolerance" help="Used for numeric comparisons (absolute) — smaller = stricter">
                   <Input placeholder="e.g. 1e-6" />
                 </Form.Item>
 
@@ -353,7 +354,7 @@ const AnalysisPage = () => {
                     <Option value={false}>No</Option>
                     <Option value={true}>Yes</Option>
                   </Select>
-                </Form.Item>
+                </Form.Item> */}
 
                 <Form.Item>
                   <Button

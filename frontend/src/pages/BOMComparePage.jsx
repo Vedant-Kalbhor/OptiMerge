@@ -341,10 +341,10 @@ export default function BOMComparePage() {
           <Title level={4} style={{ margin: 0 }}>
             Detailed BOM Comparison
           </Title>
-          <Text type="secondary">
+          {/* <Text type="secondary">
             Comparison shows quantities (common = min(qA,qB); unique = remaining
             qty)
-          </Text>
+          </Text> */}
         </Col>
         <Col>
           <Button onClick={handleExportCsv} type="primary" style={{ marginRight: 8 }}>
