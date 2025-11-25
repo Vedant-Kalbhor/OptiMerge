@@ -80,7 +80,7 @@ const WeldmentResultsPage = () => {
         return <Progress percent={Math.round(pct)} size="small" format={p => `${p.toFixed(1)}%`} />;
       }
     },
-    { title: 'Matching (letters)', dataIndex: 'matching_columns_letters', key: 'matching_columns_letters', render: v => <div style={{ fontFamily: 'monospace' }}>{v}</div> },
+    // { title: 'Matching (letters)', dataIndex: 'matching_columns_letters', key: 'matching_columns_letters', render: v => <div style={{ fontFamily: 'monospace' }}>{v}</div> },
     { title: 'Matching (columns)', dataIndex: 'matching_columns', key: 'matching_columns', render: arr => (Array.isArray(arr) ? arr.map((c,i) => <Tag key={i}>{c}</Tag>) : null) }
   ];
 
