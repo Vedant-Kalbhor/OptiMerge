@@ -1,4 +1,4 @@
-from pymongo import MongoClient
+from pymongo import MongoClient, errors
 from dotenv import load_dotenv
 import os
 
@@ -11,8 +11,9 @@ DB_NAME = os.getenv("DB_NAME", "bom_optimization")  # fallback default
 if not MONGO_URL:
     raise ValueError("MONGO_URI is missing in your .env file")
 
-# Create a global Mongo client (singleton)
-client = MongoClient(MONGO_URL)
+# Create a global Mongo client (lazy connection)
+# serverSelectionTimeoutMS just controls how long it waits when it actually tries to talk to the cluster
+client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
 
 # Select database (use DB_NAME from env or default)
 db = client[DB_NAME]
@@ -22,5 +23,15 @@ analysis_collection = db["analysis_results"]
 bom_files_collection = db["bom_files"]
 users_collection = db["users"]
 
-# Ensure unique email for users
-users_collection.create_index("email", unique=True)
+
+def ensure_indexes():
+    """
+    Create required indexes. Wrapped in try/except so that index creation
+    failure doesn't crash the whole app at import/startup.
+    """
+    try:
+        users_collection.create_index("email", unique=True)
+        print("✅ MongoDB indexes ensured (users.email unique)")
+    except errors.PyMongoError as e:
+        # Don't crash app; just log a warning
+        print(f"⚠️  Warning: could not create MongoDB index on users.email: {e}")

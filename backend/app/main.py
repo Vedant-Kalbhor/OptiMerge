@@ -12,7 +12,8 @@ from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
-from .db import analysis_collection, users_collection
+from .db import analysis_collection, users_collection, ensure_indexes
+
 from bson import ObjectId
 
 # Import the modularized functions
@@ -620,6 +621,11 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "timestamp": pd.Timestamp.now().isoformat()}
+
+@app.on_event("startup")
+def on_startup():
+  # Try to create indexes; failure will be logged but not crash the app
+  ensure_indexes()
 
 
 if __name__ == "__main__":
