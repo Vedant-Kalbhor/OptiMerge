@@ -1,31 +1,100 @@
 import pandas as pd
 import numpy as np
+import re
 from typing import Dict, Any, List, Tuple
 import math
 import re
 from collections import defaultdict
 
 def clean_column_name(column_name: str) -> str:
-    """Same cleaning helper used in BOM logic"""
     if pd.isna(column_name) or column_name is None:
         return "unknown"
     cleaned = re.sub(r'[^a-zA-Z0-9]', '_', str(column_name).lower())
     cleaned = re.sub(r'_+', '_', cleaned)
     return cleaned.strip('_')
 
-# --- BOM preprocessing ---
-def preprocess_bom_file(bom_df: pd.DataFrame) -> pd.DataFrame:
-    """Preprocess BOM file to create assembly_id from Lev hierarchy"""
-    bom_df.columns = bom_df.columns.str.lower().str.strip()
 
-    # Create assembly IDs based on lev
-    current_assembly = None
+def preprocess_bom_file(bom_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Normalize BOM DataFrame:
+    - normalize column names
+    - detect/rename price and currency columns to 'unit_price' and 'currency'
+    - detect/rename component and lev-like columns
+    - coerce quantities and lev to numeric
+    - create 'assembly_id' by using lev==0 rows as assembly headers
+    - mark assembly rows with 'is_assembly'
+    """
+    bom_df = bom_df.copy()
+    bom_df.columns = [clean_column_name(c) for c in bom_df.columns]
+
+    # Detect price and currency columns heuristically
+    price_col = None
+    currency_col = None
+    for col in bom_df.columns:
+        if any(k in col for k in ['price', 'std_price', 'stdprice', 'unit_price', 'unitprice', 'cost', 'std']):
+            price_col = col if price_col is None else price_col
+        if any(k in col for k in ['crcy', 'currency', 'curr']):
+            currency_col = col if currency_col is None else currency_col
+
+    if price_col:
+        bom_df = bom_df.rename(columns={price_col: 'unit_price'})
+    if currency_col:
+        bom_df = bom_df.rename(columns={currency_col: 'currency'})
+
+    # Detect component / part column
+    if 'component' not in bom_df.columns:
+        cand = next((c for c in bom_df.columns if 'component' in c or 'part' in c or 'part_no' in c or 'item' in c), None)
+        if cand:
+            bom_df = bom_df.rename(columns={cand: 'component'})
+
+    # Detect lev / level column
+    if 'lev' not in bom_df.columns:
+        cand = next((c for c in bom_df.columns if 'lev' in c or 'level' in c), None)
+        if cand:
+            bom_df = bom_df.rename(columns={cand: 'lev'})
+
+    # Detect quantity column
+    if 'quantity' not in bom_df.columns:
+        cand = next((c for c in bom_df.columns if 'qty' in c or 'quantity' in c or 'qtty' in c), None)
+        if cand:
+            bom_df = bom_df.rename(columns={cand: 'quantity'})
+
+    # Ensure columns exist
+    if 'lev' not in bom_df.columns:
+        bom_df['lev'] = 0
+    else:
+        bom_df['lev'] = pd.to_numeric(bom_df['lev'], errors='coerce').fillna(0).astype(int)
+
+    if 'component' not in bom_df.columns:
+        bom_df['component'] = bom_df.index.astype(str)
+    else:
+        bom_df['component'] = bom_df['component'].astype(str)
+
+    if 'quantity' not in bom_df.columns:
+        bom_df['quantity'] = 1.0
+    else:
+        bom_df['quantity'] = pd.to_numeric(bom_df['quantity'], errors='coerce').fillna(0.0)
+
+    # Ensure unit_price present and numeric (keep NaNs as 0.0)
+    if 'unit_price' not in bom_df.columns:
+        bom_df['unit_price'] = 0.0
+    else:
+        bom_df['unit_price'] = bom_df['unit_price'].replace('', np.nan)
+        bom_df['unit_price'] = pd.to_numeric(bom_df['unit_price'], errors='coerce').fillna(0.0)
+
+    if 'currency' not in bom_df.columns:
+        bom_df['currency'] = ''
+    else:
+        bom_df['currency'] = bom_df['currency'].astype(str).fillna('').str.strip()
+
+    # Build assembly_id from lev (lev==0 rows are assemblies)
     assembly_ids = []
+    current_assembly = None
     for idx, row in bom_df.iterrows():
-        lev = row.get('lev', None)
+        lev = int(row.get('lev', 0))
         component = row.get('component', None)
         if lev == 0:
-            current_assembly = component
+            current_assembly = str(component).strip() if component is not None else f"ASSY_{idx}"
             assembly_ids.append(current_assembly)
         else:
             if current_assembly is None:
@@ -34,95 +103,26 @@ def preprocess_bom_file(bom_df: pd.DataFrame) -> pd.DataFrame:
 
     bom_df['assembly_id'] = assembly_ids
     bom_df['is_assembly'] = bom_df['lev'] == 0
+
     return bom_df
 
 
-# --- BOM validators/parsers ---
 def validate_bom_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Validate and clean BOM data (keeps behavior from original main.py)"""
-    print("Validating BOM data...")
-    print("BOM columns:", df.columns.tolist())
-    df.columns = [clean_column_name(col) for col in df.columns]
-
-    # Find required columns
-    component_col = None
-    lev_col = None
-    quantity_col = None
-
-    for col in df.columns:
-        col_lower = col.lower()
-        if 'component' in col_lower or 'part' in col_lower:
-            component_col = col
-        elif 'lev' in col_lower or 'level' in col_lower:
-            lev_col = col
-        elif 'quantity' in col_lower or 'qty' in col_lower:
-            quantity_col = col
-
-    if component_col:
-        df = df.rename(columns={component_col: 'component'})
-    if lev_col:
-        df = df.rename(columns={lev_col: 'lev'})
-    if quantity_col:
-        df = df.rename(columns={quantity_col: 'quantity'})
-
-    missing_columns = []
-    if 'component' not in df.columns:
-        missing_columns.append('component')
-    if 'lev' not in df.columns:
-        missing_columns.append('lev')
-    if 'quantity' not in df.columns:
-        missing_columns.append('quantity')
-
-    if missing_columns:
-        raise ValueError(f"Missing required columns: {missing_columns}. Available columns: {df.columns.tolist()}")
-
-    df = df.dropna(subset=['component'])
-    df['lev'] = pd.to_numeric(df['lev'], errors='coerce')
-    df['quantity'] = pd.to_numeric(df.get('quantity', 0), errors='coerce').fillna(0)
-
-    if 'assembly_id' not in df.columns:
-        level_0_components = df[df['lev'] == 0]['component'].unique()
-        if len(level_0_components) > 0:
-            df['assembly_id'] = df['component'].apply(
-                lambda x: next((comp for comp in level_0_components if str(comp) in str(x)), 'default_assembly')
-            )
-        else:
-            df['assembly_id'] = 'default_assembly'
-
-    print(f"BOM data validated. Records: {len(df)}")
-    return df
-
-
-# --- BOM analysis logic (quantity-aware) ---
-def create_empty_bom_results() -> Dict[str, Any]:
-    return {
-        "similarity_matrix": {},
-        "similar_pairs": [],
-        "replacement_suggestions": [],
-        "component_replacement_table": [],  # NEW: component-level replacement suggestions
-        "bom_statistics": {
-            "total_components": 0,
-            "unique_components": 0,
-            "total_assemblies": 0,
-            "total_clusters": 0,
-            "similar_pairs_count": 0,
-            "reduction_potential": 0.0
-        },
-        "clusters": []
-    }
+    """Lightweight validation and normalization"""
+    if df is None or not isinstance(df, pd.DataFrame):
+        raise ValueError("Input BOM must be a pandas DataFrame")
+    processed = preprocess_bom_file(df)
+    processed = processed.dropna(subset=['component'])
+    return processed
 
 
 def _to_float_safe(v) -> float:
-    """Convert value to float safely; non-numeric -> 0.0"""
     try:
         if v is None:
             return 0.0
-        # If it's already numeric
         if isinstance(v, (int, float)):
             return float(v)
-        # If it's string, strip and parse
         s = str(v).strip()
-        # empty string -> 0
         if s == "":
             return 0.0
         return float(s)
@@ -130,18 +130,153 @@ def _to_float_safe(v) -> float:
         return 0.0
 
 
-def _compute_quantity_aware_lists(
-    comp_map_a: Dict[str, float], comp_map_b: Dict[str, float]
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]], float]:
+def compute_bom_similarity(assembly_components: Dict[str, Dict[str, float]], threshold: float = 0.0) -> Dict[str, Any]:
     """
-    Given two component->qty maps, compute:
-      - common_components: list of {component, qty_a, qty_b, common_qty}
-      - unique_components_a: list of {component, qty} where qty is remaining in A after common removed
-      - unique_components_b: same for B
-      - common_quantity_total: sum of common_qty across components
+    Quantity-aware pairwise similarity.
 
-    All quantities are floats.
+    - assembly_components: {assembly_name: {component_name: qty, ...}, ...}
+    - Returns:
+        {
+          "similarity_matrix": {a: {b: pct(0-100), ...}, ...},
+          "similar_pairs": [
+            {
+              "bom_a": a,
+              "bom_b": b,
+              "similarity_score": pct_as_0_1,
+              "common_components": [...names...],
+              "unique_components_a": [...names...],
+              "unique_components_b": [...names...],
+              "common_count": int,
+              "unique_count_a": int,
+              "unique_count_b": int,
+              "common_components_detailed": [
+                  {"component": name, "qty_a": x, "qty_b": y, "common_qty": min(x,y)}, ...
+              ],
+              "unique_components_a_detailed": [{"component": name, "qty": qty}, ...],
+              "unique_components_b_detailed": [{"component": name, "qty": qty}, ...],
+              "common_qty_total": float
+            },
+            ...
+          ]
+        }
+    - similarity uses weighted Jaccard over quantities:
+        inter = sum(min(qA,qB) for each component)
+        union = sum(max(qA,qB) for each component)
+      pct = (inter / union) * 100 (union==0 => pct=100)
     """
+    def _to_float_safe(x):
+        try:
+            return float(x)
+        except Exception:
+            return 0.0
+
+    assemblies = list(assembly_components.keys())
+    similarity_matrix: Dict[str, Dict[str, float]] = {}
+    similar_pairs: list = []
+
+    for i, a in enumerate(assemblies):
+        comp_a_map = assembly_components.get(a, {}) or {}
+        # normalize keys -> str and qty -> float
+        comp_a = {str(k): _to_float_safe(v) for k, v in comp_a_map.items()}
+        keys_a = set(comp_a.keys())
+        similarity_matrix.setdefault(a, {})
+
+        for j, b in enumerate(assemblies):
+            comp_b_map = assembly_components.get(b, {}) or {}
+            comp_b = {str(k): _to_float_safe(v) for k, v in comp_b_map.items()}
+            keys_b = set(comp_b.keys())
+
+            union_keys = sorted(keys_a | keys_b)
+
+            inter_sum = 0.0
+            union_sum = 0.0
+            for k in union_keys:
+                qA = comp_a.get(k, 0.0)
+                qB = comp_b.get(k, 0.0)
+                inter_sum += min(qA, qB)
+                union_sum += max(qA, qB)
+
+            if union_sum == 0.0:
+                pct = 100.0
+            else:
+                pct = (inter_sum / union_sum) * 100.0
+
+            similarity_matrix[a][b] = round(pct, 6)
+
+            # build pair entry only once (i < j) and if passes threshold
+            if i < j and pct >= threshold:
+                # legacy simple name lists (for compatibility)
+                common_names = []
+                unique_a_names = []
+                unique_b_names = []
+
+                common_detailed = []
+                unique_a_detailed = []
+                unique_b_detailed = []
+                common_qty_total = 0.0
+
+                for k in union_keys:
+                    qA = comp_a.get(k, 0.0)
+                    qB = comp_b.get(k, 0.0)
+                    if qA > 0.0 and qB > 0.0:
+                        common_names.append(k)
+                        common_q = min(qA, qB)
+                        common_detailed.append({
+                            "component": k,
+                            "qty_a": qA,
+                            "qty_b": qB,
+                            "common_qty": common_q
+                        })
+                        common_qty_total += common_q
+                        # if there is remainder, add to unique detailed
+                        remA = qA - common_q
+                        remB = qB - common_q
+                        if remA > 0:
+                            unique_a_detailed.append({"component": k, "qty": remA})
+                        if remB > 0:
+                            unique_b_detailed.append({"component": k, "qty": remB})
+                    else:
+                        if qA > 0.0:
+                            unique_a_names.append(k)
+                            unique_a_detailed.append({"component": k, "qty": qA})
+                        if qB > 0.0:
+                            unique_b_names.append(k)
+                            unique_b_detailed.append({"component": k, "qty": qB})
+
+                # --- build legacy name-only lists (if you want to preserve them) ---
+                common_names = [d["component"] for d in common_detailed]
+                unique_a_names = [d["component"] for d in unique_a_detailed]
+                unique_b_names = [d["component"] for d in unique_b_detailed]
+
+                # --- Make the fields used directly by the frontend contain objects (qty-aware) ---
+                pair_entry = {
+                    "bom_a": a,
+                    "bom_b": b,
+                    "similarity_score": round(pct / 100.0, 6),
+
+                    # PRIMARY: quantity-aware arrays (frontend will now show qty)
+                    "common_components": common_detailed,                # [{component, qty_a, qty_b, common_qty}, ...]
+                    "unique_components_a": unique_a_detailed,           # [{component, qty}, ...]
+                    "unique_components_b": unique_b_detailed,           # [{component, qty}, ...]
+
+                    "common_count": len(common_detailed),
+                    "unique_count_a": len(unique_a_detailed),
+                    "unique_count_b": len(unique_b_detailed),
+
+                    # PRESERVE older name-only lists under new keys (optional)
+                    "common_component_names": sorted(common_names),
+                    "unique_component_names_a": sorted(unique_a_names),
+                    "unique_component_names_b": sorted(unique_b_names),
+
+                    "common_qty_total": round(common_qty_total, 6)
+                }
+
+                similar_pairs.append(pair_entry)
+
+    return {"similarity_matrix": similarity_matrix, "similar_pairs": similar_pairs}
+
+
+def _compute_quantity_aware_lists(comp_map_a: Dict[str, float], comp_map_b: Dict[str, float]):
     keys = sorted(set(list(comp_map_a.keys()) + list(comp_map_b.keys())))
     common_components = []
     unique_components_a = []
@@ -154,28 +289,16 @@ def _compute_quantity_aware_lists(
         common_qty = min(qA, qB)
 
         if common_qty > 0:
-            common_components.append({
-                "component": comp,
-                "qty_a": qA,
-                "qty_b": qB,
-                "common_qty": common_qty
-            })
+            common_components.append({"component": comp, "qty_a": qA, "qty_b": qB, "common_qty": common_qty})
             common_quantity_total += common_qty
 
         remA = max(0.0, qA - common_qty)
         remB = max(0.0, qB - common_qty)
 
         if remA > 0:
-            unique_components_a.append({
-                "component": comp,
-                "qty": remA
-            })
+            unique_components_a.append({"component": comp, "qty": remA})
         if remB > 0:
-            unique_components_b.append({
-                "component": comp,
-                "qty": remB
-            })
-
+            unique_components_b.append({"component": comp, "qty": remB})
     return common_components, unique_components_a, unique_components_b, common_quantity_total
 
 
@@ -278,55 +401,45 @@ def _compute_replacement_rows_for_pair(
     bom_b: str,
     comp_map_a: Dict[str, float],
     comp_map_b: Dict[str, float],
+    unit_price_map: Dict[str, float],
     original_jaccard_pct: float
 ) -> List[Dict[str, Any]]:
     """
-    For a single BOM pair (A, B), generate a table of hypothetical replacements:
-    - Replace_In_BOM: "Replace_In_A" or "Replace_In_B"
-    - Replace_Out: component to be removed from that BOM
-    - Replace_In_With: component brought in from the other BOM
-    - New_MatchPct: Jaccard % after that replacement
-    - DeltaPct: improvement vs original_jaccard_pct (can be <= 0)
-    - NewMatchedCount: |intersection|
-    - NewTotalAfter: |union|
-    - Direction: "A<-B" or "B<-A"
-
-    IMPORTANT CHANGE: we NO LONGER filter out non-improving replacements.
-    This guarantees we always have rows as long as both sides have unique components.
+    Generate component-level replacement rows (keeps previous behavior).
+    Estimated cost deltas use available unit_price_map for components.
     """
     set_a = set(comp_map_a.keys())
     set_b = set(comp_map_b.keys())
 
-    orig_inter = set_a & set_b
-    orig_union = set_a | set_b
-
-    if len(orig_union) == 0:
+    if len(set_a) == 0 and len(set_b) == 0:
         base_jaccard_pct = 100.0
     else:
-        base_jaccard_pct = (len(orig_inter) / len(orig_union)) * 100.0
+        orig_inter = set_a & set_b
+        orig_union = set_a | set_b
+        base_jaccard_pct = (len(orig_inter) / len(orig_union) * 100.0) if len(orig_union) > 0 else 100.0
 
-    # Prefer the similarity coming from the main computation
     if original_jaccard_pct is not None:
         base_jaccard_pct = original_jaccard_pct
 
     unique_a = sorted(list(set_a - set_b))
     unique_b = sorted(list(set_b - set_a))
+    rows = []
 
-    rows: List[Dict[str, Any]] = []
-
-    # Direction A<-B (modify A to be closer to B)
     for out_comp in unique_a:
         for in_comp in unique_b:
             new_set_a = (set_a - {out_comp}) | {in_comp}
             inter = new_set_a & set_b
             union = new_set_a | set_b
-
-            if len(union) == 0:
-                new_pct = 100.0
-            else:
-                new_pct = (len(inter) / len(union)) * 100.0
-
+            new_pct = (len(inter) / len(union) * 100.0) if len(union) > 0 else 100.0
             delta = new_pct - base_jaccard_pct
+
+            qty_out = _to_float_safe(comp_map_a.get(out_comp, 0.0))
+            qty_in = _to_float_safe(comp_map_b.get(in_comp, 0.0))
+            price_out = _to_float_safe(unit_price_map.get(out_comp, 0.0))
+            price_in = _to_float_safe(unit_price_map.get(in_comp, 0.0))
+            cost_before = qty_out * price_out
+            cost_after = qty_in * price_in
+            estimated_cost_delta = cost_before * -1 + cost_after
 
             rows.append({
                 "bom_a": bom_a,
@@ -336,24 +449,25 @@ def _compute_replacement_rows_for_pair(
                 "Replace_In_With": in_comp,
                 "New_MatchPct": round(new_pct, 2),
                 "DeltaPct": round(delta, 2),
-                "NewMatchedCount": int(len(inter)),
-                "NewTotalAfter": int(len(union)),
-                "Direction": "A<-B"
+                "Direction": "A<-B",
+                "estimated_cost_delta": round(estimated_cost_delta, 6)
             })
 
-    # Direction B<-A (modify B to be closer to A)
     for out_comp in unique_b:
         for in_comp in unique_a:
             new_set_b = (set_b - {out_comp}) | {in_comp}
             inter = set_a & new_set_b
             union = set_a | new_set_b
-
-            if len(union) == 0:
-                new_pct = 100.0
-            else:
-                new_pct = (len(inter) / len(union)) * 100.0
-
+            new_pct = (len(inter) / len(union) * 100.0) if len(union) > 0 else 100.0
             delta = new_pct - base_jaccard_pct
+
+            qty_out = _to_float_safe(comp_map_b.get(out_comp, 0.0))
+            qty_in = _to_float_safe(comp_map_a.get(in_comp, 0.0))
+            price_out = _to_float_safe(unit_price_map.get(out_comp, 0.0))
+            price_in = _to_float_safe(unit_price_map.get(in_comp, 0.0))
+            cost_before = qty_out * price_out
+            cost_after = qty_in * price_in
+            estimated_cost_delta = cost_before * -1 + cost_after
 
             rows.append({
                 "bom_a": bom_a,
@@ -363,40 +477,23 @@ def _compute_replacement_rows_for_pair(
                 "Replace_In_With": in_comp,
                 "New_MatchPct": round(new_pct, 2),
                 "DeltaPct": round(delta, 2),
-                "NewMatchedCount": int(len(inter)),
-                "NewTotalAfter": int(len(union)),
-                "Direction": "B<-A"
+                "Direction": "B<-A",
+                "estimated_cost_delta": round(estimated_cost_delta, 6)
             })
 
-    # Sort rows so best improvements appear first (still useful for UI)
-    rows.sort(
-        key=lambda r: (
-            -r["DeltaPct"],          # higher improvement first
-            -r["New_MatchPct"],      # then higher new match
-            r["Replace_In_BOM"],     # stable ordering
-            r["Replace_Out"],
-            r["Replace_In_With"],
-        )
-    )
+    # Sort to present likely-highest-match improvements and cost-saving candidates first
+    rows.sort(key=lambda r: ((r.get("DeltaPct") is not None and -r["DeltaPct"]), r.get("estimated_cost_delta", 0.0)))
     return rows
 
 
 def generate_component_replacement_table(
     assembly_components: Dict[str, Dict[str, float]],
     similar_pairs: List[Dict[str, Any]],
+    unit_price_map: Dict[str, float],
     max_pairs: int = None
 ) -> List[Dict[str, Any]]:
-    """
-    For all similar BOM pairs, generate a flat list of replacement rows
-    in the format expected by the frontend:
-      Replace_In_BOM, Replace_Out, Replace_In_With,
-      New_MatchPct, DeltaPct, NewMatchedCount, NewTotalAfter, Direction.
-    """
-    rows: List[Dict[str, Any]] = []
-    pairs_iter = similar_pairs
-    if max_pairs is not None:
-        pairs_iter = similar_pairs[:max_pairs]
-
+    rows = []
+    pairs_iter = similar_pairs if max_pairs is None else similar_pairs[:max_pairs]
     for pair in pairs_iter:
         bom_a = pair["bom_a"]
         bom_b = pair["bom_b"]
@@ -405,155 +502,195 @@ def generate_component_replacement_table(
 
         comp_map_a = assembly_components.get(bom_a, {}) or {}
         comp_map_b = assembly_components.get(bom_b, {}) or {}
-
-        pair_rows = _compute_replacement_rows_for_pair(
-            bom_a=bom_a,
-            bom_b=bom_b,
-            comp_map_a=comp_map_a,
-            comp_map_b=comp_map_b,
-            original_jaccard_pct=original_jaccard_pct
-        )
-        rows.extend(pair_rows)
-
+        rows.extend(_compute_replacement_rows_for_pair(bom_a, bom_b, comp_map_a, comp_map_b, unit_price_map, pair.get("similarity_score", 0.0)*100.0))
     return rows
 
 
-def generate_replacement_suggestions(similar_pairs: List[Dict], limit: int = 5) -> List[Dict]:
+def generate_replacement_suggestions(similar_pairs: List[Dict], assembly_costs: Dict[str, float], currency_map: Dict[str,str]=None, limit: int = 10) -> List[Dict]:
     suggestions = []
 
     for pair in similar_pairs[:limit]:
         assy_a = pair["bom_a"]
         assy_b = pair["bom_b"]
-        similarity = pair["similarity_score"]
+        sim_score = pair.get("similarity_score", 0.0)
 
-        unique_a = pair.get("unique_count_a", 0)
-        unique_b = pair.get("unique_count_b", 0)
-        total_unique = unique_a + unique_b
+        cost_a = _to_float_safe(assembly_costs.get(assy_a, 0.0))
+        cost_b = _to_float_safe(assembly_costs.get(assy_b, 0.0))
 
-        potential_savings = pair.get("common_quantity_total", pair.get("common_count", 0))
+        if cost_a > cost_b:
+            replace_from = assy_a
+            replace_with = assy_b
+            savings = cost_a - cost_b
+        else:
+            replace_from = assy_b
+            replace_with = assy_a
+            savings = cost_b - cost_a
 
-        suggestion = {
-            "type": "bom_consolidation",
-            "bom_a": assy_a,
-            "bom_b": assy_b,
-            "similarity_score": similarity,
-            "suggestion": f"Consolidate {assy_a} and {assy_b} ({(similarity*100):.1f}% similar)",
-            "confidence": similarity,
-            "potential_savings": potential_savings,
+        currency = ''
+        if currency_map:
+            currency = currency_map.get(assy_a) or currency_map.get(assy_b) or ''
+
+        suggestions.append({
+            "type": "bom_cost_consolidation",
+            "bom_replace_from": replace_from,
+            "bom_replace_with": replace_with,
+            "similarity_score": sim_score,
+            "suggestion": f"Replace variant {replace_from} with {replace_with} to save approx {currency}{savings:.2f}",
+            "confidence": sim_score,
+            "estimated_savings": round(savings, 6),
+            "currency": currency,
             "details": {
-                "common_components": pair.get("common_count", 0),
-                "common_quantity_total": potential_savings,
-                "unique_to_a": unique_a,
-                "unique_to_b": unique_b
+                "cost_a": round(cost_a, 6),
+                "cost_b": round(cost_b, 6)
             }
-        }
-        suggestions.append(suggestion)
-
+        })
     return suggestions
 
 
 def find_assembly_clusters(assemblies: List[str], similarity_matrix: Dict, threshold: float = 80.0) -> List[List[str]]:
-    """Group assemblies into clusters based on similarity (uses threshold 80 by default)"""
     clusters = []
-    used_assemblies = set()
-
-    for assembly in assemblies:
-        if assembly not in used_assemblies:
-            cluster = [assembly]
-            used_assemblies.add(assembly)
-
-            for other_assembly in assemblies:
-                if (other_assembly not in used_assemblies and
-                        similarity_matrix.get(assembly, {}).get(other_assembly, 0) > threshold):
-                    cluster.append(other_assembly)
-                    used_assemblies.add(other_assembly)
-
-            clusters.append(cluster)
-
+    used = set()
+    for a in assemblies:
+        if a in used:
+            continue
+        cluster = [a]
+        used.add(a)
+        for b in assemblies:
+            if b not in used and similarity_matrix.get(a, {}).get(b, 0) > threshold:
+                cluster.append(b)
+                used.add(b)
+        clusters.append(cluster)
     return clusters
 
 
 def calculate_reduction_potential(clusters: List[List[str]], total_assemblies: int) -> float:
     if total_assemblies == 0:
         return 0.0
-
-    total_reduction = 0
-    for cluster in clusters:
-        total_reduction += max(0, len(cluster) - 1)
-
-    reduction_potential = (total_reduction / total_assemblies) * 100
-    return round(reduction_potential, 1)
+    total_reduction = sum(max(0, len(c) - 1) for c in clusters)
+    return round((total_reduction / total_assemblies) * 100, 1)
 
 
 def analyze_bom_data(bom_df: pd.DataFrame, threshold: float = 70.0) -> Dict[str, Any]:
-    """Main BOM analysis function (quantity-aware)"""
-    print("\n=== Starting BOM Analysis ===")
+    """
+    Main analysis entrypoint.
+    Key change: assembly (variant) cost is derived from the assembly header row's unit_price (lev==0).
+    If assembly header has unit_price > 0, that value is used as the variant cost. Otherwise, fallback
+    to summing component qty * unit_price for the assembly's components.
+    """
+    processed = preprocess_bom_file(bom_df)
 
-    bom_df_processed = preprocess_bom_file(bom_df)
+    # Components (lev > 0) and assemblies (lev == 0)
+    component_df = processed[processed['lev'] > 0].copy()
+    assembly_headers = processed[processed['lev'] == 0].copy()
 
-    # Filter out assembly rows for component analysis
-    component_df = bom_df_processed[bom_df_processed['lev'] > 0].copy()
+    assemblies = processed['assembly_id'].unique().tolist()
+    if len(assemblies) < 2:
+        return {
+            "similarity_matrix": {},
+            "similar_pairs": [],
+            "replacement_suggestions": [],
+            "component_replacement_table": [],
+            "bom_statistics": {},
+            "clusters": [],
+            "assembly_costs": {},
+            "unit_price_map": {},
+            "currency_map": {}
+        }
 
-    assemblies = component_df['assembly_id'].unique()
-    num_assemblies = len(assemblies)
+    # Build per-assembly component->qty map and unit_price_map for components
+    assembly_components = {}
+    unit_price_map = {}
+    currency_map = {}
+    assembly_costs = {}
 
-    print(f"Assemblies found: {num_assemblies}")
+    # First: global unit price map for components (take first non-zero value)
+    for _, r in processed.iterrows():
+        comp = str(r['component']).strip()
+        price = _to_float_safe(r.get('unit_price', 0.0))
+        if comp and price > 0 and unit_price_map.get(comp, 0.0) == 0.0:
+            unit_price_map[comp] = price
 
-    if num_assemblies < 2:
-        print("Need at least 2 assemblies for analysis")
-        return create_empty_bom_results()
-
-    # Create component -> quantity dicts for each assembly
-    assembly_components: Dict[str, Dict[str, float]] = {}
+    # Now per-assembly maps
     for assembly in assemblies:
-        assembly_data = component_df[component_df['assembly_id'] == assembly]
-        comp_qty: Dict[str, float] = {}
-        for _, r in assembly_data.iterrows():
-            comp_name = str(r['component']).strip()
-            qty = r.get('quantity', 0.0)
-            try:
-                qty = float(qty) if not pd.isna(qty) else 0.0
-            except Exception:
-                qty = 0.0
-            comp_qty[comp_name] = comp_qty.get(comp_name, 0.0) + qty
+        # component rows for this assembly (lev > 0)
+        rows = component_df[component_df['assembly_id'] == assembly]
+        comp_qty = {}
+        # default total by summing components (fallback)
+        total_by_components = 0.0
+        for _, r in rows.iterrows():
+            name = str(r['component']).strip()
+            qty = _to_float_safe(r.get('quantity', 0.0))
+            comp_qty[name] = comp_qty.get(name, 0.0) + qty
+            # attempt to get a price for the component (component row unit_price)
+            price = _to_float_safe(r.get('unit_price', 0.0)) or unit_price_map.get(name, 0.0)
+            total_by_components += qty * price
         assembly_components[assembly] = comp_qty
 
-    # Compute similarity
+        # Check for assembly header row price (lev==0) — prefer that as the variant cost
+        header_row = assembly_headers[assembly_headers['assembly_id'] == assembly]
+        assembly_price = 0.0
+        assembly_currency = ''
+        if not header_row.empty:
+            # If multiple header rows exist, take the first non-zero unit_price found
+            for _, hr in header_row.iterrows():
+                ap = _to_float_safe(hr.get('unit_price', 0.0))
+                if ap > 0:
+                    assembly_price = ap
+                    break
+            # capture currency if present
+            curvals = header_row['currency'].dropna().astype(str).str.strip().unique().tolist()
+            assembly_currency = curvals[0] if curvals else ''
+        # If assembly-level price present and >0, use it as the variant cost; else fallback to sum of components
+        final_assembly_cost = assembly_price if assembly_price > 0 else total_by_components
+        assembly_costs[assembly] = round(final_assembly_cost, 6)
+        if assembly_currency:
+            currency_map[assembly] = assembly_currency
+
+    # compute similarities
     similarity_results = compute_bom_similarity(assembly_components, threshold)
 
-    # Generate suggestions & clusters
-    replacement_suggestions = generate_replacement_suggestions(similarity_results["similar_pairs"])
-    clusters = find_assembly_clusters(list(assemblies), similarity_results["similarity_matrix"])
-
-    # NEW: generate detailed component-replacement table
+    # component-level replacement rows (unchanged)
     component_replacement_table = generate_component_replacement_table(
         assembly_components=assembly_components,
         similar_pairs=similarity_results["similar_pairs"],
-        max_pairs=None
+        unit_price_map=unit_price_map
     )
 
-    # Calculate statistics
+    # cost-aware replacement suggestions
+    replacement_suggestions = generate_replacement_suggestions(
+        similarity_results["similar_pairs"],
+        assembly_costs,
+        currency_map=currency_map,
+        limit=20
+    )
+
+    clusters = find_assembly_clusters(assemblies, similarity_results["similarity_matrix"])
     total_components = len(component_df)
     unique_components = component_df['component'].nunique()
-    reduction_potential = calculate_reduction_potential(clusters, num_assemblies)
+    # reduction_potential = calculate_reduction_potential(clusters, num_assemblies)
 
-    final_results = {
+    bom_statistics = {
+        "total_components": total_components,
+        "unique_components": unique_components,
+        "total_assemblies": len(assemblies),
+        "total_clusters": len(clusters),
+        "similar_pairs_count": len(similarity_results["similar_pairs"]),
+        "reduction_potential": calculate_reduction_potential(clusters, len(assemblies))
+    }
+
+    return {
         "similarity_matrix": similarity_results["similarity_matrix"],
         "similar_pairs": similarity_results["similar_pairs"],
         "replacement_suggestions": replacement_suggestions,
         "component_replacement_table": component_replacement_table,
-        "bom_statistics": {
-            "total_components": total_components,
-            "unique_components": unique_components,
-            "total_assemblies": num_assemblies,
-            "total_clusters": len(clusters),
-            "similar_pairs_count": len(similarity_results["similar_pairs"]),
-            "reduction_potential": reduction_potential
-        },
-        "clusters": clusters
+        "bom_statistics": bom_statistics,
+        "clusters": clusters,
+        "assembly_costs": assembly_costs,
+        "unit_price_map": unit_price_map,
+        "currency_map": currency_map
     }
 
-    print(f"Analysis complete: {num_assemblies} assemblies, {len(similarity_results['similar_pairs'])} similar pairs")
-    print(f"Generated {len(component_replacement_table)} component-level replacement rows")
-    return final_results
+    # print(f"Analysis complete: {num_assemblies} assemblies, {len(similarity_results['similar_pairs'])} similar pairs")
+    # print(f"Generated {len(component_replacement_table)} component-level replacement rows")
+    # return final_results
 

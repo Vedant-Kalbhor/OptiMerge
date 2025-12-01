@@ -11,6 +11,7 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from passlib.context import CryptContext
+import logging
 
 from .db import analysis_collection, users_collection, ensure_indexes
 
@@ -46,10 +47,21 @@ app.add_middleware(
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-this-secret-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+logger = logging.getLogger(__name__)
+pwd_context = CryptContext(
+    schemes=["argon2", "bcrypt", "pbkdf2_sha256"],
+    deprecated="auto"
+)
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Optional explicit fallback context for long inputs (supports arbitrary length)
+_long_input_ctx = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+
+BCRYPT_MAX_BYTES = 72
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
+def _utf8_byte_len(s: str) -> int:
+    """Return number of bytes when string encoded in UTF-8."""
+    return len(s.encode("utf-8"))
 
 # --------- Pydantic schemas ---------
 class UserBase(BaseModel):
@@ -82,11 +94,41 @@ class TokenData(BaseModel):
 
 # --------- Auth utility functions ---------
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    """
+    Hash the password safely.
+    - If argon2 is available, CryptContext will use it and all is fine (supports any length).
+    - If argon2 not available and password (utf-8) <= 72 bytes, bcrypt will be used (if available).
+    - If password (utf-8) > 72 bytes we avoid calling bcrypt to prevent the ValueError and use a safe fallback (pbkdf2_sha256).
+    """
+    if _utf8_byte_len(password) > BCRYPT_MAX_BYTES:
+        # Avoid bcrypt's 72-byte limit: choose a scheme that supports long inputs.
+        logger.info("Password exceeds bcrypt 72-byte limit — using pbkdf2_sha256 to hash.")
+        return _long_input_ctx.hash(password)
+
+    # Otherwise let pwd_context pick (argon2 if present, else bcrypt if present, else pbkdf2_sha256)
+    try:
+        return pwd_context.hash(password)
+    except Exception as exc:
+        # Defensive: if hashing fails for any backend (rare), fallback to pbkdf2
+        logger.exception("Primary password hash failed; falling back to pbkdf2_sha256.")
+        return _long_input_ctx.hash(password)
+
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """
+    Verify a password against a hash. CryptContext will auto-detect the scheme from the hash string.
+    We test against both contexts so we can verify hashes produced by either path.
+    """
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except Exception:
+        # As a last resort try the long-input context (for pbkdf2 hashed values).
+        try:
+            return _long_input_ctx.verify(plain_password, hashed_password)
+        except Exception:
+            logger.exception("Password verification failed due to unexpected error.")
+            return False
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -426,7 +468,7 @@ async def analyze_bom_similarity(request: dict):
         print(f"Assemblies found: {df['assembly_id'].unique()}")
 
         # Use bom_utils.analyze_bom_data (expects threshold in percentage)
-        threshold_percent = threshold * 100
+        threshold_percent = threshold * 100 if threshold <= 1.0 else float(threshold)
         bom_result = analyze_bom_data(df, threshold=threshold_percent)
 
         analysis_id = generate_file_id()
@@ -447,8 +489,11 @@ async def analyze_bom_similarity(request: dict):
                 "similarity_matrix": bom_result.get("similarity_matrix", {}),
                 "similar_pairs": bom_result.get("similar_pairs", []),
                 "replacement_suggestions": bom_result.get("replacement_suggestions", []),
-                "component_replacement_table": bom_result.get("component_replacement_table", []),  # NEW
-                "bom_statistics": bom_result.get("bom_statistics", {})
+                "component_replacement_table": bom_result.get("component_replacement_table", []),
+                "bom_statistics": bom_result.get("bom_statistics", {}),
+                "assembly_costs": bom_result.get("assembly_costs", {}),
+                "unit_price_map": bom_result.get("unit_price_map", {}),
+                "currency_map": bom_result.get("currency_map", {})
             }
         }
 
@@ -475,14 +520,32 @@ async def analyze_bom_similarity(request: dict):
 # -------------------------
 @app.get("/analysis/{analysis_id}")
 async def get_analysis(analysis_id: str):
-    # Look by id in MongoDB collection
-    print(analysis_id)
-    analysis = analysis_collection.find_one({"id": analysis_id})
-    if not analysis:
-        raise HTTPException(status_code=404, detail="Analysis not found")
+    """
+    Return the stored analysis result *raw* object (the same shape the frontend expects).
+    Fallback to in-memory 'analysis_results' if MongoDB document is not present.
+    """
+    # First try MongoDB
+    try:
+        analysis_doc = analysis_collection.find_one({"id": analysis_id})
+    except Exception as e:
+        analysis_doc = None
+        logger.exception("Error querying MongoDB for analysis: %s", str(e))
 
-    analysis["_id"] = str(analysis["_id"])
-    return analysis
+    if analysis_doc:
+        # Mongo DB document stores the raw result at 'raw' per save_analysis_to_mongodb
+        raw = analysis_doc.get("raw") or analysis_doc.get("result") or analysis_doc
+        # If the document itself is the raw structure, return it; otherwise, return the 'raw' payload.
+        if isinstance(raw, dict) and ("bom_analysis" in raw or "clustering" in raw):
+            return raw
+        # If 'raw' isn't present, return the document but strip Mongo metadata
+        analysis_doc["_id"] = str(analysis_doc["_id"])
+        return analysis_doc
+
+    # Fallback: check in-memory store
+    if analysis_id in analysis_results:
+        return analysis_results[analysis_id]
+
+    raise HTTPException(status_code=404, detail="Analysis not found")
 
 
 @app.get("/recent-analyses")
@@ -514,6 +577,7 @@ def save_analysis_to_mongodb(analysis_id: str, analysis_type: str, result: dict)
     except Exception as e:
         print(f"❌ Error saving to MongoDB: {str(e)}")
         # don't raise so API still returns results even if Mongo fails
+
 
 # --- Weldment pairwise endpoint ---
 @app.post("/analyze/weldment-pairwise/")

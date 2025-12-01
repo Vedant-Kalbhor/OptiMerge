@@ -6,14 +6,18 @@ load_dotenv()
 
 # MongoDB Connection URL
 MONGO_URL = os.getenv("MONGO_URI")
-DB_NAME = os.getenv("DB_NAME", "bom_optimization")  # fallback default
+DB_NAME = os.getenv("DB_NAME", "optimerge")
 
 if not MONGO_URL:
     raise ValueError("MONGO_URI is missing in your .env file")
 
 # Create a global Mongo client (lazy connection)
 # serverSelectionTimeoutMS just controls how long it waits when it actually tries to talk to the cluster
-client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+client = MongoClient(
+    MONGO_URL,
+    serverSelectionTimeoutMS=5000,
+    maxPoolSize=50,
+)
 
 # Select database (use DB_NAME from env or default)
 db = client[DB_NAME]

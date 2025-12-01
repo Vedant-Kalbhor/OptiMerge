@@ -80,7 +80,7 @@ function App() {
                     margin: '20px',
                     background: '#fff',
                     padding: '20px',
-                    borderRadius: '8px',
+                    borderRadius: '20px',
                   }}
                 >
                   <Routes>
@@ -154,7 +154,8 @@ function App() {
                       }
                     />
                     <Route
-                      path="/results/bom/replacements/:analysisId/:bomA/:bomB"
+                      // path="/results/bom/replacements/:analysisId/:bomA/:bomB"
+                      path="/results/bom/replacements"
                       element={
                         <PrivateRoute>
                           <BOMReplacementSuggestion />
