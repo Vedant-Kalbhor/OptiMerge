@@ -579,33 +579,11 @@ def save_analysis_to_mongodb(analysis_id: str, analysis_type: str, result: dict)
         # don't raise so API still returns results even if Mongo fails
 
 
-# --- Weldment pairwise endpoint ---
 @app.post("/analyze/weldment-pairwise/")
 async def analyze_weldment_pairwise(request: dict):
     """
     Perform one-to-one pairwise comparison on an uploaded weldment file.
-    Accepts:
-      - weldment_file_id (str) required
-      - tolerance (float) optional (defaults 1e-6)
-      - threshold (float) optional (0-1 or 0-100) filter for minimum match% (defaults 0.3)
-      - include_self (bool) optional (defaults True)
-      - columns_to_compare (list) optional
-
-    Logic:
-      * If file has the 11 required geometry columns, we compare ONLY those
-        (never Cost / EAU).
-      * If file ALSO has Cost + EAU:
-          - still compare only geometry
-          - find ~100% matches
-          - choose cheaper assembly as "recommended"
-          - Old price = expensive assembly cost
-          - New price = recommended (cheaper) assembly cost
-          - Old-New price = old - new
-          - EAU used = EAU of the old (expensive) assembly only
-          - Total Cost Before = old_price * old_eau
-          - Total Cost After  = new_price * old_eau
-          - Cost Savings = (old_price - new_price) * old_eau
-          - Savings %   = (old_price - new_price) / old_price * 100
+    Now with support for handling groups of 3+ similar assemblies.
     """
     try:
         weldment_file_id = request.get('weldment_file_id')
@@ -659,7 +637,7 @@ async def analyze_weldment_pairwise(request: dict):
             columns_to_compare = None
 
         # ---------------------------------------------------
-        # 3) Normalize threshold 0–1 → 0–100
+        # 3) Normalize threshold 0-1 → 0-100
         # ---------------------------------------------------
         threshold_percent = float(threshold)
         if threshold_percent <= 1.0:
@@ -688,17 +666,16 @@ async def analyze_weldment_pairwise(request: dict):
                     "match_percentage": float(rec.get("Match percentage") or 0.0),
                     "matching_columns": rec.get("matching_cols_list") or [],
                     "unmatching_columns": rec.get("unmatching_cols_list") or [],
-                    # "matching_columns_letters": rec.get("Matching Columns") or "",
-                    # "unmatching_columns_letters": rec.get("Unmatching") or ""
                 })
 
         # ---------------------------------------------------
-        # 5) Cost-savings (per suggested replacement)
+        # 5) NEW LOGIC: Cost-savings with grouping for 3+ similar assemblies
         # ---------------------------------------------------
         cost_savings_block = {
             "has_cost_data": False,
             "rows": [],
-            "statistics": {}
+            "statistics": {},
+            "groups": []  # Track groups for debugging/display
         }
 
         if has_cost_data and len(pairwise_records) > 0:
@@ -723,107 +700,119 @@ async def analyze_weldment_pairwise(request: dict):
                     "eau": eau_val
                 }
 
-            rows_cs = []
-            seen_pairs = set()
-            total_before = 0.0
-            total_after = 0.0
-            total_savings = 0.0
-
+            # Step 1: Find 100% matching pairs
+            perfect_matches = []
             for rec in pairwise_records:
                 match_pct = float(rec.get("match_percentage") or 0.0)
+                if match_pct >= 99.95:  # Consider as 100%
+                    a = str(rec.get("bom_a") or "")
+                    b = str(rec.get("bom_b") or "")
+                    if a and b and a in cost_lookup and b in cost_lookup:
+                        perfect_matches.append((a, b))
 
-                # Treat anything >= 99.95 as 100% match
-                if match_pct < 99.95:
+            # Step 2: Build connected components (groups) of similar assemblies
+            from collections import defaultdict
+            
+            # Build adjacency list
+            adj = defaultdict(set)
+            for a, b in perfect_matches:
+                adj[a].add(b)
+                adj[b].add(a)
+
+            # Find connected components using DFS
+            visited = set()
+            groups = []
+
+            def dfs(node, component):
+                component.add(node)
+                visited.add(node)
+                for neighbor in adj[node]:
+                    if neighbor not in visited:
+                        dfs(neighbor, component)
+
+            for node in adj:
+                if node not in visited:
+                    component = set()
+                    dfs(node, component)
+                    if len(component) > 1:  # Only groups with at least 2 assemblies
+                        groups.append(component)
+
+            # Step 3: Process each group
+            rows_cs = []
+            seen_replacements = set()  # Track which replacements we've already processed
+            
+            for group in groups:
+                group_list = list(group)
+                # Find the cheapest assembly in the group
+                min_cost = float('inf')
+                min_assy = None
+                min_cost_data = None
+                
+                for assy in group_list:
+                    if assy in cost_lookup:
+                        cost = cost_lookup[assy]["cost"]
+                        if cost < min_cost:
+                            min_cost = cost
+                            min_assy = assy
+                            min_cost_data = cost_lookup[assy]
+                
+                if min_assy is None:
                     continue
+                
+                # Create replacement suggestions for all non-cheapest assemblies
+                for assy in group_list:
+                    if assy == min_assy:
+                        continue  # Skip the cheapest one
+                    
+                    # Check if we've already processed this replacement
+                    replacement_key = (assy, min_assy)
+                    if replacement_key in seen_replacements:
+                        continue
+                    seen_replacements.add(replacement_key)
+                    
+                    old_data = cost_lookup.get(assy)
+                    new_data = min_cost_data
+                    
+                    if not old_data or not new_data:
+                        continue
+                    
+                    old_price = old_data["cost"]
+                    new_price = new_data["cost"]
+                    old_eau = old_data["eau"]  # Use EAU of the old assembly
+                    
+                    price_diff = old_price - new_price
+                    
+                    total_cost_before = old_price * old_eau
+                    total_cost_after = new_price * old_eau
+                    cost_saving = total_cost_before - total_cost_after
+                    savings_percent = (price_diff / old_price) * 100.0 if old_price > 0 else 0.0
+                    
+                    rows_cs.append({
+                        "bom_a": assy,  # Old assembly
+                        "bom_b": min_assy,  # New assembly (cheapest)
+                        "match_percentage": 100.0,
+                        "cost_a": old_price,
+                        "eau_a": old_eau,
+                        "cost_b": new_price,
+                        "eau_b": new_data["eau"],
+                        "recommended_assembly": min_assy,
+                        "recommended_cost": new_price,
+                        "old_price": old_price,
+                        "new_price": new_price,
+                        "old_new_price": price_diff,
+                        "effective_eau": old_eau,
+                        "total_cost_before": total_cost_before,
+                        "total_cost_after": total_cost_after,
+                        "cost_savings": cost_saving,
+                        "savings_percent": savings_percent,
+                        "group_size": len(group_list),  # For debugging
+                        "group_members": list(group_list)  # For debugging
+                    })
 
-                a = str(rec.get("bom_a") or "")
-                b = str(rec.get("bom_b") or "")
-                if not a or not b:
-                    continue
-
-                # avoid double counting A-B and B-A
-                pair_key = tuple(sorted((a, b)))
-                if pair_key in seen_pairs:
-                    continue
-                seen_pairs.add(pair_key)
-
-                data_a = cost_lookup.get(a)
-                data_b = cost_lookup.get(b)
-                if not data_a or not data_b:
-                    continue
-
-                cost_a = data_a["cost"]
-                cost_b = data_b["cost"]
-                eau_a = data_a["eau"]
-                eau_b = data_b["eau"]
-
-                # -------------------------------
-                # NEW REQUIRED LOGIC:
-                # Suggested replacement savings
-                # -------------------------------
-                if cost_a <= cost_b:
-                    # A is cheaper → recommended
-                    recommended_assembly = a
-                    recommended_cost = cost_a
-                    new_price = cost_a
-                    old_price = cost_b
-                    old_eau = eau_b  # only EAU of old (expensive) assembly
-                else:
-                    # B is cheaper → recommended
-                    recommended_assembly = b
-                    recommended_cost = cost_b
-                    new_price = cost_b
-                    old_price = cost_a
-                    old_eau = eau_a
-
-                price_diff = old_price - new_price  # Old - New Price
-
-                total_cost_before = old_price * old_eau
-                total_cost_after = new_price * old_eau
-                cost_saving = total_cost_before - total_cost_after  # = price_diff * old_eau
-                savings_percent = (
-                    (price_diff / old_price) * 100.0
-                    if old_price > 0 else 0.0
-                )
-
-                # -------------------------------
-                # OLD LOGIC (KEEP BUT COMMENTED)
-                # -------------------------------
-                # # Before: each assembly uses its own cost & EAU
-                # total_cost_before_old = cost_a * eau_a + cost_b * eau_b
-                # # After: move all demand to cheaper assembly
-                # min_cost = min(cost_a, cost_b)
-                # total_cost_after_old = min_cost * (eau_a + eau_b)
-                # cost_saving_old = total_cost_before_old - total_cost_after_old
-                # savings_percent_old = (
-                #     cost_saving_old / total_cost_before_old * 100.0
-                #     if total_cost_before_old > 0 else 0.0
-                # )
-
-                rows_cs.append({
-                    "bom_a": a,
-                    "bom_b": b,
-                    "match_percentage": match_pct,
-                    "cost_a": cost_a,
-                    "eau_a": eau_a,
-                    "cost_b": cost_b,
-                    "eau_b": eau_b,
-                    "recommended_assembly": recommended_assembly,
-                    "recommended_cost": recommended_cost,
-                    "old_price": old_price,
-                    "new_price": new_price,
-                    "old_new_price": price_diff,
-                    "effective_eau": old_eau,
-                    "total_cost_before": total_cost_before,
-                    "total_cost_after": total_cost_after,
-                    "cost_savings": cost_saving,
-                    "savings_percent": savings_percent,
-                })
-
-                total_before += total_cost_before
-                total_after += total_cost_after
-                total_savings += cost_saving
-
+            # Calculate statistics
+            total_before = sum(r["total_cost_before"] for r in rows_cs)
+            total_after = sum(r["total_cost_after"] for r in rows_cs)
+            total_savings = sum(r["cost_savings"] for r in rows_cs)
             avg_savings_percent = (
                 sum(r["savings_percent"] for r in rows_cs) / len(rows_cs)
                 if rows_cs else 0.0
@@ -837,8 +826,17 @@ async def analyze_weldment_pairwise(request: dict):
                     "total_cost_before": total_before,
                     "total_cost_after": total_after,
                     "total_cost_savings": total_savings,
-                    "avg_savings_percent": avg_savings_percent
-                }
+                    "avg_savings_percent": avg_savings_percent,
+                    "num_groups": len(groups)
+                },
+                "groups": [
+                    {
+                        "members": list(group),
+                        "cheapest": min(list(group), key=lambda x: cost_lookup.get(x, {}).get("cost", float('inf'))) 
+                        if cost_lookup else None
+                    }
+                    for group in groups
+                ]
             }
 
         # ---------------------------------------------------
@@ -887,7 +885,6 @@ async def analyze_weldment_pairwise(request: dict):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Weldment pairwise analysis failed: {str(e)}")
-
 
 @app.get("/")
 async def root():

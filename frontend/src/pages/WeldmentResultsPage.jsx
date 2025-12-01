@@ -10,12 +10,15 @@ import {
   message,
   Statistic,
   Row,
-  Col
+  Col,
+  Collapse
 } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
+
+const { Panel } = Collapse;
 
 const WeldmentResultsPage = () => {
   const [results, setResults] = useState(null);
@@ -72,73 +75,78 @@ const WeldmentResultsPage = () => {
 
       if (hasCostSavings) {
         const savingsRows = results.cost_savings.rows || [];
+        
+        // Group savings by assembly groups (for summary)
+        const groups = {};
+        savingsRows.forEach(row => {
+          const groupKey = row.group_members?.sort().join(',') || row.bom_a;
+          if (!groups[groupKey]) {
+            groups[groupKey] = {
+              members: row.group_members || [row.bom_a, row.bom_b],
+              cheapest: row.recommended_assembly,
+              rows: []
+            };
+          }
+          groups[groupKey].rows.push(row);
+        });
+
+        // Export with group information
         const header = [
-          'Assembly A',
-          'Assembly B',
+          'Group ID',
+          'Group Members',
+          'Cheapest Assembly',
+          'Assembly A (Old)',
+          'Assembly B (New)',
           'Match %',
-          // 'Matching Letters',
-          'Matching Columns',
-          // 'Unmatching Letters',
           'Cost A',
           'EAU A',
           'Cost B',
-          'EAU B',
-          'Old Price',
-          'New Price',
           'Old-New Price',
-          'Effective EAU',
-          'Recommended Assembly',
-          'Recommended Cost',
+          'EAU (Replaced)',
           'Total Cost Before',
           'Total Cost After',
           'Cost Savings',
           'Savings %'
         ];
 
-        const keyFn = (a, b) => `${a}__${b}`;
-        const costMap = {};
-        savingsRows.forEach(r => {
-          const k1 = keyFn(r.bom_a, r.bom_b);
-          const k2 = keyFn(r.bom_b, r.bom_a);
-          costMap[k1] = r;
-          costMap[k2] = r;
+        const csvRows = [header.join(',')];
+        
+        // Add group summary first
+        Object.entries(groups).forEach(([groupKey, group], idx) => {
+          const groupTotalSavings = group.rows.reduce((sum, r) => sum + (r.cost_savings || 0), 0);
+          csvRows.push([
+            `Group ${idx + 1}`,
+            `"${group.members.join(', ')}"`,
+            group.cheapest,
+            '', '', '', '', '', '', '', '', '', '', '',
+            groupTotalSavings.toFixed(2)
+          ].join(','));
+          
+          // Then add individual rows
+          group.rows.forEach(row => {
+            csvRows.push([
+              `Group ${idx + 1}`,
+              `"${row.group_members?.join(', ') || [row.bom_a, row.bom_b].join(', ')}"`,
+              row.recommended_assembly,
+              row.bom_a,
+              row.bom_b,
+              row.match_percentage?.toFixed(1) || '100.0',
+              row.cost_a?.toFixed(2) || '',
+              row.eau_a || '',
+              row.cost_b?.toFixed(2) || '',
+              row.old_new_price?.toFixed(2) || '',
+              row.effective_eau || '',
+              row.total_cost_before?.toFixed(2) || '',
+              row.total_cost_after?.toFixed(2) || '',
+              row.cost_savings?.toFixed(2) || '',
+              row.savings_percent?.toFixed(2) || ''
+            ].join(','));
+          });
         });
 
-        const csvRows = [
-          header.join(','),
-          ...rows.map(r => {
-            const pairKey = keyFn(r.bom_a, r.bom_b);
-            const c = costMap[pairKey] || {};
-            return [
-              `"${(r.bom_a || '').replace(/"/g, '""')}"`,
-              `"${(r.bom_b || '').replace(/"/g, '""')}"`,
-              `${r.match_percentage ?? 0}`,
-              // `"${(r.matching_columns_letters || '').replace(/"/g, '""')}"`,
-              `"${(r.matching_columns || []).join('; ').replace(/"/g, '""')}"`,
-              // `"${(r.unmatching_columns_letters || '').replace(/"/g, '""')}"`,
-              c.cost_a ?? '',
-              c.eau_a ?? '',
-              c.cost_b ?? '',
-              c.eau_b ?? '',
-              c.old_price ?? '',
-              c.new_price ?? '',
-              c.old_new_price ?? '',
-              c.effective_eau ?? '',
-              c.recommended_assembly
-                ? `"${String(c.recommended_assembly).replace(/"/g, '""')}"`
-                : '',
-              c.recommended_cost ?? '',
-              c.total_cost_before ?? '',
-              c.total_cost_after ?? '',
-              c.cost_savings ?? '',
-              c.savings_percent ?? ''
-            ].join(',');
-          })
-        ].join('\n');
-
-        const blob = new Blob([csvRows], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `weldment-pairwise-cost-${analysisId || 'latest'}.csv`);
-        message.success('Exported CSV with cost savings');
+        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        saveAs(blob, `weldment-pairwise-groups-${analysisId || 'latest'}.csv`);
+        message.success('Exported CSV with grouped savings');
         return;
       }
 
@@ -147,9 +155,7 @@ const WeldmentResultsPage = () => {
         'Assembly A',
         'Assembly B',
         'Match %',
-        // 'Matching Letters',
-        'Matching Columns',
-        // 'Unmatching Letters'
+        'Matching Columns'
       ];
       const csvRows = [
         header.join(','),
@@ -158,9 +164,7 @@ const WeldmentResultsPage = () => {
             `"${(r.bom_a || '').replace(/"/g, '""')}"`,
             `"${(r.bom_b || '').replace(/"/g, '""')}"`,
             `${r.match_percentage ?? 0}`,
-            // `"${(r.matching_columns_letters || '').replace(/"/g, '""')}"`,
             `"${(r.matching_columns || []).join('; ').replace(/"/g, '""')}"`,
-            // `"${(r.unmatching_columns_letters || '').replace(/"/g, '""')}"`,
           ].join(',')
         )
       ].join('\n');
@@ -216,16 +220,50 @@ const WeldmentResultsPage = () => {
   const costColumns = hasCostSavings
     ? [
         {
-          title: 'Assembly A',
-          dataIndex: 'bom_a',
-          key: 'bom_a',
-          render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span>
+          title: 'Group',
+          dataIndex: 'group_members',
+          key: 'group',
+          render: (members, record) => {
+            if (!members || !Array.isArray(members)) {
+              return '-';
+            }
+            const groupId = record.group_members?.sort().join(',') || 'single';
+            return (
+              <Tag color="blue">
+                Group of {members.length}
+              </Tag>
+            );
+          }
         },
         {
-          title: 'Assembly B',
+          title: 'Assembly A (Old)',
+          dataIndex: 'bom_a',
+          key: 'bom_a',
+          render: (t, record) => (
+            <div>
+              <span style={{ fontFamily: 'monospace' }}>{t}</span>
+              {record.group_members && record.group_members.length > 2 && (
+                <div style={{ fontSize: '0.8em', color: '#666' }}>
+                  From group of {record.group_members.length}
+                </div>
+              )}
+            </div>
+          )
+        },
+        {
+          title: 'Assembly B (New)',
           dataIndex: 'bom_b',
           key: 'bom_b',
-          render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span>
+          render: (t, record) => (
+            <div>
+              <span style={{ fontFamily: 'monospace', color: '#52c41a', fontWeight: 'bold' }}>
+                {t}
+              </span>
+              <div style={{ fontSize: '0.8em', color: '#52c41a' }}>
+                (Cheapest)
+              </div>
+            </div>
+          )
         },
         {
           title: 'Match %',
@@ -234,35 +272,11 @@ const WeldmentResultsPage = () => {
           render: val => {
             const pct = Number(val) || 0;
             return (
-              <span style={{ color: '#52c41a' }}>
+              <span style={{ color: '#52c41a', fontWeight: 'bold' }}>
                 {pct.toFixed(1)}%
               </span>
             );
           }
-        },
-        {
-          title: 'Cost A',
-          dataIndex: 'cost_a',
-          key: 'cost_a',
-          render: v => (v != null ? Number(v).toLocaleString() : '-')
-        },
-        {
-          title: 'EAU A',
-          dataIndex: 'eau_a',
-          key: 'eau_a',
-          render: v => (v != null ? Number(v).toLocaleString() : '-')
-        },
-        {
-          title: 'Cost B',
-          dataIndex: 'cost_b',
-          key: 'cost_b',
-          render: v => (v != null ? Number(v).toLocaleString() : '-')
-        },
-        {
-          title: 'EAU B',
-          dataIndex: 'eau_b',
-          key: 'eau_b',
-          render: v => (v != null ? Number(v).toLocaleString() : '-')
         },
         {
           title: 'Old-New Price',
@@ -280,12 +294,6 @@ const WeldmentResultsPage = () => {
           dataIndex: 'effective_eau',
           key: 'effective_eau',
           render: v => (v != null ? Number(v).toLocaleString() : '-')
-        },
-        {
-          title: 'Recommended Assembly',
-          dataIndex: 'recommended_assembly',
-          key: 'recommended_assembly',
-          render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span>
         },
         {
           title: 'Total Cost Before',
@@ -360,9 +368,28 @@ const WeldmentResultsPage = () => {
   if (hasCostSavings) {
     const statsBlock = results.cost_savings.statistics || {};
     const totalPairs = results.pairwise_table?.length || 0;
-    const totalPerfect = statsBlock.pair_count_100 || 0;
+    const totalReplacements = statsBlock.pair_count_100 || 0;
     const totalSavings = statsBlock.total_cost_savings || 0;
     const avgSavingsPercent = statsBlock.avg_savings_percent || 0;
+    const numGroups = statsBlock.num_groups || 0;
+    
+    // Group savings rows by their group
+    const groupsMap = {};
+    if (results.cost_savings.rows) {
+      results.cost_savings.rows.forEach(row => {
+        const groupKey = row.group_members?.sort().join(',') || row.bom_a;
+        if (!groupsMap[groupKey]) {
+          groupsMap[groupKey] = {
+            members: row.group_members || [row.bom_a, row.bom_b],
+            cheapest: row.recommended_assembly,
+            rows: [],
+            totalSavings: 0
+          };
+        }
+        groupsMap[groupKey].rows.push(row);
+        groupsMap[groupKey].totalSavings += row.cost_savings || 0;
+      });
+    }
 
     return (
       <div>
@@ -374,13 +401,14 @@ const WeldmentResultsPage = () => {
               <Statistic title="Pairs Above Threshold" value={totalPairs} />
             </Col>
             <Col xs={24} sm={12} md={6}>
-              <Statistic title="100% Matching Pairs" value={totalPerfect} />
+              <Statistic title="Replacement Opportunities" value={totalReplacements} />
             </Col>
             <Col xs={24} sm={12} md={6}>
               <Statistic
-                title="Total Savings (All Replacements)"
+                title="Total Savings"
                 value={totalSavings}
                 precision={2}
+                prefix="£"
               />
             </Col>
             <Col xs={24} sm={12} md={6}>
@@ -395,10 +423,48 @@ const WeldmentResultsPage = () => {
 
           <div style={{ marginTop: 16, textAlign: 'right' }}>
             <Button icon={<DownloadOutlined />} onClick={handleExportCSV}>
-              Export CSV (with cost)
+              Export CSV (with groups)
             </Button>
           </div>
         </Card>
+
+        {/* Display groups */}
+        {numGroups > 0 && (
+          <Card title="Similar Assembly Groups" style={{ marginBottom: 20 }}>
+            <Collapse>
+              {Object.entries(groupsMap).map(([key, group], idx) => (
+                <Panel 
+                  header={
+                    <div>
+                      <strong>Group {idx + 1}</strong>: {group.members.length} similar assemblies
+                      <span style={{ marginLeft: 20, color: '#52c41a' }}>
+                        Cheapest: {group.cheapest} | Total Savings: £{group.totalSavings.toFixed(2)}
+                      </span>
+                    </div>
+                  } 
+                  key={idx}
+                >
+                  <div style={{ padding: '10px 0' }}>
+                    <strong>Members:</strong> {group.members.join(', ')}
+                  </div>
+                  <div style={{ padding: '10px 0' }}>
+                    <strong>Cheapest Assembly:</strong> {group.cheapest}
+                  </div>
+                  <div style={{ padding: '10px 0' }}>
+                    <strong>Replacements:</strong>
+                    <ul>
+                      {group.rows.map((row, rowIdx) => (
+                        <li key={rowIdx}>
+                          {row.bom_a} → {row.bom_b}: Save £{row.cost_savings?.toFixed(2)} ({row.savings_percent?.toFixed(2)}%)
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </Panel>
+              ))}
+            </Collapse>
+          </Card>
+        )}
 
         <Card title="Pairwise Dimension Comparison" style={{ marginBottom: 20 }}>
           <Table
@@ -409,7 +475,7 @@ const WeldmentResultsPage = () => {
           />
         </Card>
 
-        <Card title="Cost & EAU Savings for 100% Matches">
+        <Card title="Cost Savings from Replacements">
           <Table
             columns={costColumns}
             dataSource={results.cost_savings.rows || []}
