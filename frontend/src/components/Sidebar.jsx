@@ -1,46 +1,36 @@
 import React from 'react';
-import { Menu } from 'antd';
-import { 
-  DashboardOutlined, 
-  UploadOutlined, 
-  BarChartOutlined, 
-  ClusterOutlined 
+import { Menu, Button } from 'antd';
+import {
+  DashboardOutlined,
+  UploadOutlined,
+  BarChartOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-const Sidebar = () => {
+const Sidebar = ({ collapsed, toggleCollapse }) => {
   const navigate = useNavigate();
   const location = useLocation();
 
   const menuItems = [
-    {
-      key: '/',
-      icon: <DashboardOutlined />,
-      label: 'Dashboard',
-    },
-    {
-      key: '/upload',
-      icon: <UploadOutlined />,
-      label: 'Upload Files',
-    },
-    {
-      key: '/analysis',
-      icon: <BarChartOutlined />,
-      label: 'Analysis',
-    },
-    // {
-    //   key: '/results',
-    //   icon: <ClusterOutlined />,
-    //   label: 'Results',
-    // },
+    { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
+    { key: '/upload', icon: <UploadOutlined />, label: 'Upload Files' },
+    { key: '/analysis', icon: <BarChartOutlined />, label: 'Analysis' },
   ];
 
   return (
     <div>
-      {/* <div className="logo"> */}
-      <div >
-        Menu Bar 
+      {/* Toggle Button */}
+      <div style={{ padding: 10, textAlign: 'center' }}>
+        <Button
+          type="primary"
+          icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+          onClick={toggleCollapse}
+          style={{ width: '100%' }}
+        />
       </div>
+
       <Menu
         theme="dark"
         selectedKeys={[location.pathname]}
