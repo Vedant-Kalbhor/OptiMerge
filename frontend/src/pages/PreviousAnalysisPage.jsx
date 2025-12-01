@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState , useMemo} from 'react';
 import {
   Card,
   Table,
@@ -23,6 +23,19 @@ import { saveAs } from 'file-saver';
 import ClusterChart from '../components/ClusterChart';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
+import { Bar } from 'react-chartjs-2';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js/auto';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 /**
  * PreviousAnalysisPage
@@ -237,6 +250,33 @@ const PreviousAnalysisPage = () => {
       message.error('Export failed');
     }
   };
+// --- BOM helpers (paste near other helpers) ---
+const handleExportSimilarPairs = (bomResultsLocal) => {
+  try {
+    const pairs = bomResultsLocal?.similar_pairs || [];
+    if (pairs.length === 0) {
+      message.warning('No BOM similarity data to export');
+      return;
+    }
+
+    const csvContent = [
+      ['BOM A', 'BOM B', 'Similarity Score', 'Common Components Count'],
+      ...pairs.map(p => [
+        p.bom_a,
+        p.bom_b,
+        (p.similarity_score * 100).toFixed(1) + '%',
+        Array.isArray(p.common_components) ? p.common_components.length : (p.common_components ? 1 : 0)
+      ])
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    saveAs(blob, `bom-similarity-${analysisId || 'latest'}.csv`);
+    message.success('BOM similarity exported successfully');
+  } catch (error) {
+    console.error(error);
+    message.error('Failed to export BOM similarity');
+  }
+};
 
   // ----------------- column defs -----------------
   const clusterColumns = [
@@ -273,21 +313,141 @@ const PreviousAnalysisPage = () => {
   ];
 
   const similarityColumns = [
-    { title: 'BOM A', dataIndex: 'bom_a', key: 'bom_a' },
-    { title: 'BOM B', dataIndex: 'bom_b', key: 'bom_b' },
-    {
-      title: 'Similarity',
-      dataIndex: 'similarity_score',
-      key: 'similarity_score',
-      render: (s) => <Progress percent={Math.round((s || 0) * 100)} size="small" />
-    },
-    {
-      title: 'Common Components',
-      dataIndex: 'common_components',
-      key: 'common_components',
-      render: (list) => (list || []).map((c, i) => <Tag key={i}>{c.component || c}</Tag>)
+  {
+    title: 'BOM A',
+    dataIndex: 'bom_a',
+    key: 'bom_a',
+    width: 120,
+  },
+  {
+    title: 'BOM B',
+    dataIndex: 'bom_b',
+    key: 'bom_b',
+    width: 120,
+  },
+  {
+    title: 'Similarity Score',
+    dataIndex: 'similarity_score',
+    key: 'similarity_score',
+    width: 150,
+    render: (score) => (
+      <Progress
+        percent={Math.round((score || 0) * 100)}
+        size="small"
+        status={(score || 0) > 0.9 ? 'success' : (score || 0) > 0.5 ? 'active' : 'exception'}
+      />
+    ),
+  },
+  {
+    title: 'Common Components',
+    dataIndex: 'common_components',
+    key: 'common_components',
+    render: (components, record) => {
+      let componentList = [];
+
+      if (Array.isArray(components)) {
+        componentList = components;
+      } else if (typeof components === 'string') {
+        componentList = components.split(/\s+/).filter(Boolean);
+      } else if (!components && record && record.common_components) {
+        componentList = record.common_components;
+      }
+
+      return (
+        <div style={{ maxWidth: '500px', maxHeight: '150px', overflow: 'auto' }}>
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '6px',
+            padding: '6px',
+            border: '1px solid #f0f0f0',
+            borderRadius: '4px',
+            backgroundColor: '#fafafa'
+          }}>
+            {componentList.map((c, i) => {
+              // `c` may be string or object { component, qty_a, qty_b, common_qty }
+              if (typeof c === 'object' && c !== null) {
+                const name = c.component || 'unknown';
+                const qa = c.qty_a != null ? c.qty_a : '-';
+                const qb = c.qty_b != null ? c.qty_b : '-';
+                const common = c.common_qty != null ? c.common_qty : null;
+                return (
+                  <div key={i} style={{
+                    padding: '4px 8px',
+                    backgroundColor: '#fff',
+                    border: '1px solid #e9e9e9',
+                    borderRadius: '6px',
+                    fontSize: '12px',
+                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'flex-start'
+                  }}>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>{name}</div>
+                    <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>
+                      <span style={{ marginRight: 8 }}>A:{qa}</span>
+                      <span>B:{qb}</span>
+                      {common !== null && <Tag style={{ marginLeft: 6 }} color="green">{common}</Tag>}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={i} style={{
+                  padding: '2px 6px',
+                  backgroundColor: '#e6f7ff',
+                  border: '1px solid #91d5ff',
+                  borderRadius: '12px',
+                  fontSize: '11px',
+                  fontFamily: 'monospace',
+                  fontWeight: '500',
+                  color: '#0050b3',
+                  whiteSpace: 'nowrap'
+                }}>
+                  {String(c)}
+                </div>
+              );
+            })}
+          </div>
+          {componentList.length > 0 && (
+            <div style={{ fontSize: '11px', color: '#666', marginTop: '6px' }}>
+              {componentList.length} common component{componentList.length > 1 ? 's' : ''}
+            </div>
+          )}
+        </div>
+      );
     }
-  ];
+  },
+  {
+    title: 'Details',
+    key: 'details',
+    width: 120,
+    render: (record) => (
+      <Button
+        size="small"
+        style={{
+          borderRadius: '6px',
+          padding: '0 10px',
+          fontSize: '12px',
+          background: '#f0f7ff',
+          border: '1px solid #91caff',
+          color: '#1677ff',
+          boxShadow: 'none'
+        }}
+        onClick={() =>
+          navigate(
+            `/results/bom/compare/${encodeURIComponent(record.bom_a)}/${encodeURIComponent(record.bom_b)}`,
+            { state: { pair: record } }
+          )
+        }
+      >
+        View Details
+      </Button>
+    )
+  },
+];
+
 
   const weldmentColumns = [
     {
@@ -327,6 +487,87 @@ const PreviousAnalysisPage = () => {
         Array.isArray(arr) ? arr.map((c, i) => <Tag key={i}>{c}</Tag>) : null
     }
   ];
+// If location.state carries a bom_analysis (like BOMResultsPage), prefer that
+const location = useLocation();
+
+const bomResultsLocal = raw?.bom_analysis || (doc?.bom_analysis) || (location.state?.analysisResults?.bom_analysis) || null;
+
+// duplicate no-arg handleExportSimilarPairs removed — use the earlier defined function
+// const handleExportSimilarPairs(bomResultsLocal) { ... } is defined above and should be used here
+
+const histogram = useMemo(() => {
+  const buckets = {
+    '100%': 0,
+    '90-99%': 0,
+    '80-89%': 0,
+    '70-79%': 0,
+    '60-69%': 0,
+    '50-59%': 0,
+    '<50%': 0,
+  };
+
+  const pairs = bomResultsLocal?.similar_pairs || [];
+
+  pairs.forEach(p => {
+    const score = (typeof p.similarity_score === 'number') ? p.similarity_score * 100 : 0;
+    if (score >= 100) buckets['100%'] += 1;
+    else if (score >= 90) buckets['90-99%'] += 1;
+    else if (score >= 80) buckets['80-89%'] += 1;
+    else if (score >= 70) buckets['70-79%'] += 1;
+    else if (score >= 60) buckets['60-69%'] += 1;
+    else if (score >= 50) buckets['50-59%'] += 1;
+    else buckets['<50%'] += 1;
+  });
+
+  const labels = Object.keys(buckets);
+  const data = labels.map(l => buckets[l]);
+
+  return { labels, data };
+}, [bomResultsLocal]);
+
+const chartData = {
+  labels: histogram.labels,
+  datasets: [
+    {
+      label: 'Number of BOM pairs',
+      data: histogram.data,
+      borderWidth: 1,
+      backgroundColor: histogram.data.map((_, i) => {
+        const palette = ['#d9f7be', '#b7eb8f', '#ffe58f', '#ffd6e7', '#ffd8bf', '#91d5ff', '#bae637'];
+        const idx = Math.min(palette.length - 1, i);
+        return palette[palette.length - 1 - idx];
+      }),
+    }
+  ],
+};
+
+const chartOptions = {
+  indexAxis: 'y',
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    title: {
+      display: true,
+      text: 'BOM Pair Similarity Distribution',
+      font: { size: 14 }
+    },
+    tooltip: {
+      callbacks: {
+        label: function(context) {
+          const value = context.raw || 0;
+          return `${value} pair${value !== 1 ? 's' : ''}`;
+        }
+      }
+    }
+  },
+  scales: {
+    x: { ticks: { precision: 0 }, title: { display: true, text: 'Number of BOM pairs' } },
+    y: { title: { display: false } }
+  }
+};
+
+
 
   // ----------------- render -----------------
   if (loading) {
@@ -351,20 +592,88 @@ const PreviousAnalysisPage = () => {
     );
   }
 
-  // Determine type
-  const analysisType =
-    raw.type ||
-    doc?.type ||
-    (raw.weldment_pairwise
-      ? 'weldment_pairwise'
-      : raw.bom_analysis
-      ? 'bom_analysis'
-      : raw.clustering
-      ? 'clustering'
-      : 'unknown');
+ // Replace your current `analysisType` computation with this:
+// Replace your current `analysisType` computation with this:
+const analysisType =
+  raw?.type ||
+  doc?.type ||
+  (raw?.clustering ? 'clustering'
+    : raw?.weldment_pairwise ? 'weldment_pairwise'
+    : raw?.bom_analysis ? 'bom_analysis'
+    : 'unknown');
+
+
 
   const stats = calculateStatistics(raw);
   const vizConfig = prepareVisualizationConfig(raw);
+
+  // If this is BOM analysis, render BOM-only view and exit early
+if (analysisType === 'bom_analysis') {
+  const bom = bomResultsLocal;
+  return (
+    <div style={{ padding: 20 }}>
+      <h2>Previous Analysis Result</h2>
+
+      <Row gutter={16} style={{ marginBottom: 18 }}>
+        <Col span={8}><Card><div style={{ fontSize: 18 }}>Similar BOM Pairs: {bom?.similar_pairs?.length || 0}</div></Card></Col>
+        <Col span={8}><Card><div style={{ fontSize: 18 }}>Reduction Potential: {Math.round((bom?.bom_statistics?.reduction_potential || 0))}%</div></Card></Col>
+        <Col span={8}><Card><div style={{ fontSize: 18 }}>Total Assemblies: {bom?.bom_statistics?.total_assemblies || '-'}</div></Card></Col>
+      </Row>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 22, fontWeight: 'bold', color: '#1890ff' }}>{bom?.similar_pairs?.length || 0}</div>
+            <div style={{ color: '#666' }}>Similar BOM Pairs</div>
+          </div>
+
+          <div>
+            <Button icon={<DownloadOutlined />} style={{ marginRight: 8 }} onClick={handleExportSimilarPairs}>Export Similar Pairs</Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card style={{ marginBottom: 20, background: '#f6ffed', borderColor: '#b7eb8f' }}>
+        <Button
+          type="primary"
+          size="large"
+          style={{
+            background: '#389e0d',
+            borderColor: '#237804',
+            borderRadius: '6px',
+            fontWeight: '500'
+          }}
+          onClick={() =>
+            navigate('/results/bom/replacements', {
+              state: {
+                analysisResults: { bom_analysis: bom },
+                analysisId: analysisId
+              }
+            })
+          }
+        >
+          View Replacement Suggestions
+        </Button>
+      </Card>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ height: 320 }}>
+          <Bar data={chartData} options={chartOptions} />
+        </div>
+      </Card>
+
+      <Card title="BOM Similarity Analysis" style={{ marginTop: 10 }}>
+        <Table
+          columns={similarityColumns}
+          dataSource={(bom?.similar_pairs || []).filter(pair => pair.similarity_score >= (bom?.threshold || 0))}
+          pagination={false}
+          rowKey={(record) => `${record.bom_a}-${record.bom_b}`}
+        />
+      </Card>
+    </div>
+  );
+}
+
 
   // If this is weldment pairwise, render weldment UI
   if (analysisType === 'weldment_pairwise' || raw.weldment_pairwise) {
@@ -675,18 +984,78 @@ const PreviousAnalysisPage = () => {
       <h2>Previous Analysis Result</h2>
 
       <Row gutter={16} style={{ marginBottom: 18 }}>
-        <Col span={8}>
-          <Card>
-            <div style={{ fontSize: 18 }}>Clusters: {stats.totalClusters}</div>
-          </Card>
-        </Col>
-        <Col span={8}>
-          <Card>
-            <div style={{ fontSize: 18 }}>
-              Similar BOM Pairs: {stats.similarPairs}
+        {/* Replace the existing left Col that currently always renders BOM cards
+    with this conditional block so BOM UI only appears when results exist */}
+      <Col span={8}>
+        {hasBOMResults ? (
+          <>
+            <Card style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#1890ff' }}>
+                    <BarChartOutlined style={{ marginRight: 8 }} /> {bomResultsLocal?.similar_pairs?.length || 0}
+                  </div>
+                  <div style={{ color: '#666', marginTop: 8 }}>Similar BOM Pairs</div>
+                </div>
+                <Button icon={<DownloadOutlined />} onClick={() => handleExportSimilarPairs(bomResultsLocal)}>
+                  Export Similar Pairs
+                </Button>
+              </div>
+            </Card>
+
+            <Card style={{ marginBottom: 20, background: '#f6ffed', borderColor: '#b7eb8f' }}>
+              <Button
+                type="primary"
+                size="large"
+                style={{
+                  background: '#389e0d',
+                  borderColor: '#237804',
+                  borderRadius: '6px',
+                  fontWeight: '500'
+                }}
+                onClick={() =>
+                  navigate('/results/bom/replacements', {
+                    state: {
+                      analysisResults: {
+                        bom_analysis: bomResultsLocal
+                      },
+                      analysisId: analysisId
+                    }
+                  })
+                }
+              >
+                View Replacement Suggestions
+              </Button>
+            </Card>
+
+            <Card style={{ marginBottom: 20 }}>
+              <div style={{ height: 320 }}>
+                <Bar data={chartData} options={chartOptions} />
+              </div>
+            </Card>
+
+            <Card title="BOM Similarity Analysis" style={{ marginTop: 10 }}>
+              <Table
+                columns={similarityColumns}
+                dataSource={(bomResultsLocal?.similar_pairs || []).filter(
+                  pair => pair.similarity_score >= ((bomResultsLocal?.threshold ?? 0))
+                )}
+                pagination={false}
+                rowKey={(record) => `${record.bom_a}-${record.bom_b}`}
+              />
+            </Card>
+          </>
+        ) : (
+          /* Placeholder when there are no BOM results — keep small informative card */
+          <Card style={{ marginBottom: 20, textAlign: 'center' }}>
+            <div style={{ fontSize: 18, color: '#666' }}>
+              No BOM similarity results for this analysis.
             </div>
+            <div style={{ color: '#999', marginTop: 8 }}>This analysis contains clustering data only.</div>
           </Card>
-        </Col>
+        )}
+      </Col>
+
         <Col span={8}>
           <Card>
             <div style={{ fontSize: 18 }}>
