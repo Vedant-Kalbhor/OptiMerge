@@ -11,7 +11,6 @@ DB_NAME = os.getenv("DB_NAME", "optimerge")
 if not MONGO_URL:
     raise ValueError("MONGO_URI is missing in your .env file")
 
-# Create a global Mongo client (lazy connection)
 # serverSelectionTimeoutMS just controls how long it waits when it actually tries to talk to the cluster
 client = MongoClient(
     MONGO_URL,

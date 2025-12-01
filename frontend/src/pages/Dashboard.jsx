@@ -258,7 +258,7 @@ const Dashboard = () => {
             </Card>
           </Col>
 
-          <Col span={8}>
+          {/* <Col span={8}>
             <Card
               size="small"
               title="View Results"
@@ -280,7 +280,7 @@ const Dashboard = () => {
                 </div>
               )}
             </Card>
-          </Col>
+          </Col> */}
         </Row>
       </Card>
 

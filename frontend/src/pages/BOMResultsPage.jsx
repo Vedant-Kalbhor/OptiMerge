@@ -1,9 +1,23 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Table, Tag, Progress, Alert, Button, Spin, message } from 'antd';
 import { DownloadOutlined, BarChartOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
+
+// Chart.js imports
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js/auto';
+import { Bar } from 'react-chartjs-2';
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const BOMResultsPage = () => {
   const [bomResults, setBomResults] = useState(null);
@@ -195,35 +209,86 @@ const BOMResultsPage = () => {
         </Button>
       )
     },
-    // NEW COLUMN: View Replacement Suggestions
-    {
-      title: 'Replacement Suggestions',
-      key: 'replacements',
-      width: 170,
-      render: (record) => (
-        <Button
-          size="small"
-          style={{
-            borderRadius: '6px',
-            padding: '0 10px',
-            fontSize: '12px',
-            background: '#fff7e6',
-            border: '1px solid #ffd591',
-            color: '#d46b08',
-            boxShadow: 'none'
-          }}
-          onClick={() =>
-            navigate(
-              `/results/bom/replacements/${encodeURIComponent(analysisId)}/${encodeURIComponent(record.bom_a)}/${encodeURIComponent(record.bom_b)}`,
-              { state: { pair: record } }
-            )
-          }
-        >
-          View Replacements
-        </Button>
-      )
-    },
   ];
+
+// --- Place hooks here, before any early returns ---
+const histogram = useMemo(() => {
+  const buckets = {
+    '100%': 0,
+    '90-99%': 0,
+    '80-89%': 0,
+    '70-79%': 0,
+    '60-69%': 0,
+    '50-59%': 0,
+    '<50%': 0,
+  };
+
+  // USE ALL PAIRS, NOT THRESHOLD-FILTERED
+  const pairs = bomResults?.similar_pairs || [];
+
+  pairs.forEach(p => {
+    const score = (typeof p.similarity_score === 'number') ? p.similarity_score * 100 : 0;
+    if (score >= 100) buckets['100%'] += 1;
+    else if (score >= 90) buckets['90-99%'] += 1;
+    else if (score >= 80) buckets['80-89%'] += 1;
+    else if (score >= 70) buckets['70-79%'] += 1;
+    else if (score >= 60) buckets['60-69%'] += 1;
+    else if (score >= 50) buckets['50-59%'] += 1;
+    else buckets['<50%'] += 1;
+  });
+
+  const labels = Object.keys(buckets);
+  const data = labels.map(l => buckets[l]);
+
+  return { labels, data };
+}, [bomResults]);
+
+const chartData = {
+  labels: histogram.labels,
+  datasets: [
+    {
+      label: 'Number of BOM pairs',
+      data: histogram.data,
+      borderWidth: 1,
+      backgroundColor: histogram.data.map((_, i) => {
+        const palette = ['#d9f7be', '#b7eb8f', '#ffe58f', '#ffd6e7', '#ffd8bf', '#91d5ff', '#bae637'];
+        const idx = Math.min(palette.length - 1, i);
+        return palette[palette.length - 1 - idx];
+      }),
+    }
+  ],
+};
+
+const chartOptions = {
+  indexAxis: 'y',
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    title: {
+      display: true,
+      text: 'BOM Pair Similarity Distribution',
+      font: { size: 14 }
+    },
+    tooltip: {
+      callbacks: {
+        label: function(context) {
+          const value = context.raw || 0;
+          return `${value} pair${value !== 1 ? 's' : ''}`;
+        }
+      }
+    }
+  },
+  scales: {
+    x: {
+      ticks: { precision: 0 },
+      title: { display: true, text: 'Number of BOM pairs' }
+    },
+    y: {
+      title: { display: false }
+    }
+  }
+};
 
   if (loading) {
     return (
@@ -252,6 +317,7 @@ const BOMResultsPage = () => {
     );
   }
 
+
   return (
     <div>
       <h1>BOM Similarity Results</h1>
@@ -270,29 +336,50 @@ const BOMResultsPage = () => {
         </div>
       </Card>
 
-      <Card title="BOM Similarity Analysis" style={{ marginTop: 10 }}>
-        <Table
-          columns={similarityColumns}
-          dataSource={bomResults.similar_pairs || []}
-          pagination={false}
-          rowKey={(record) => `${record.bom_a}-${record.bom_b}`}
-        />
+      <Card style={{ marginBottom: 20, background: '#f6ffed', borderColor: '#b7eb8f' }}>
+        <Button
+          type="primary"
+          size="large"
+          style={{
+            background: '#389e0d',
+            borderColor: '#237804',
+            borderRadius: '6px',
+            fontWeight: '500'
+          }}
+          onClick={() =>
+            navigate('/results/bom/replacements', {
+              state: {
+                analysisResults: {
+                  bom_analysis: bomResults
+                },
+                analysisId: analysisId
+              }
+            })
+          }
+        >
+          View Replacement Suggestions
+       </Button>
       </Card>
 
-      {bomResults.replacement_suggestions?.length > 0 && (
-        <Card title="Replacement Suggestions" style={{ marginTop: 20 }}>
-          {bomResults.replacement_suggestions.map((suggestion, index) => (
-            <Alert
-              key={index}
-              message={suggestion.suggestion}
-              description={`Confidence: ${Math.round((suggestion.confidence || 0) * 100)}% | Potential Savings: ${suggestion.potential_savings || 0} components`}
-              type="info"
-              showIcon
-              style={{ marginBottom: 10 }}
-            />
-          ))}
-        </Card>
-      )}
+      {/* --- Chart inserted below View Replacement Suggestions and above BOM Similarity Analysis --- */}
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ height: 320 }}>
+          <Bar data={chartData} options={chartOptions} />
+        </div>
+      </Card>
+
+      <Card title="BOM Similarity Analysis" style={{ marginTop: 10 }}>
+        <Table
+         columns={similarityColumns}
+        dataSource={(bomResults.similar_pairs || []).filter(
+          pair => pair.similarity_score >= (bomResults.threshold || 0)
+        )}
+         pagination={false}
+        rowKey={(record) => `${record.bom_a}-${record.bom_b}`}
+/>
+
+      </Card>
+
     </div>
   );
 };

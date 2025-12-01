@@ -267,8 +267,8 @@ const AnalysisPage = () => {
                 <Form.Item name="similarity_method" label="Similarity Method">
                   <Select>
                     <Option value="jaccard">Jaccard Similarity</Option>
-                    <Option value="cosine">Cosine Similarity</Option>
-                    <Option value="weighted">Weighted Similarity</Option>
+                    {/* <Option value="cosine">Cosine Similarity</Option>
+                    <Option value="weighted">Weighted Similarity</Option> */}
                   </Select>
                 </Form.Item>
 

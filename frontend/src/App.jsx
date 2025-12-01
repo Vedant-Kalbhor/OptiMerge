@@ -100,8 +100,7 @@ function App() {
                     <Route path="/results/weldment/:analysisId" element={<PrivateRoute><WeldmentResultsPage /></PrivateRoute>} />
                     <Route path="/results/bom/compare/:bomA/:bomB" element={<PrivateRoute><BOMComparePage /></PrivateRoute>} />
                     <Route path="/results/bom/replacements" element={<PrivateRoute><BOMReplacementSuggestion /></PrivateRoute>} />
-                    {/* // path="/results/bom/replacements/:analysisId/:bomA/:bomB"
-                      path="/results/bom/replacements" */}
+                    {/* // path="/results/bom/replacements/:analysisId/:bomA/:bomB"*/}
 
                     {/* Fallback */}
                     <Route path="*" element={<Navigate to="/" replace />} />

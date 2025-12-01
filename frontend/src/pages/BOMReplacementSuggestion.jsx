@@ -221,7 +221,7 @@ const BOMReplacementSuggestion = () => {
             Export CSV (per-variant)
           </Button>
 
-          <Button
+          {/* <Button
             icon={<ReloadOutlined />}
             onClick={() => {
               if (analysisId) loadAnalysis(analysisId);
@@ -230,7 +230,7 @@ const BOMReplacementSuggestion = () => {
             }}
           >
             Refresh
-          </Button>
+          </Button> */}
 
           <Button onClick={() => navigate(-1)}>Back</Button>
         </div>
