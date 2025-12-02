@@ -1,4 +1,4 @@
-bom-optimization-tool/
+optimerge-tool/
 ├── backend/
 │   ├── app/
 │   │   ├── __init__.py
