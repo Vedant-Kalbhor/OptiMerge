@@ -596,7 +596,10 @@ async def analyze_weldment_pairwise(request: dict):
             raise HTTPException(status_code=404, detail="Weldment file not found")
 
         df = weldment_data[weldment_file_id]["dataframe"]
-
+        
+        # Get total assemblies (record_count) from the uploaded file
+        total_assemblies = weldment_data[weldment_file_id].get("record_count", len(df))
+        
         # ---------------------------------------------------
         # 1) Detect Cost & EAU columns (case-insensitive)
         # ---------------------------------------------------
@@ -858,6 +861,7 @@ async def analyze_weldment_pairwise(request: dict):
                     "tolerance": tolerance,
                     "include_self": include_self,
                     "columns_compared": columns_to_compare,
+                    "total_assemblies": total_assemblies,  # ADDED: Pass total assemblies to frontend
                 },
                 "statistics": {"pair_count": len(pairwise_records)},
                 "cost_savings": cost_savings_block
@@ -885,7 +889,6 @@ async def analyze_weldment_pairwise(request: dict):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Weldment pairwise analysis failed: {str(e)}")
-
 @app.get("/")
 async def root():
     return {"message": "BOM Optimization Tool API", "status": "running"}

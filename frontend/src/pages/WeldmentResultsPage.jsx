@@ -23,6 +23,7 @@ const { Panel } = Collapse;
 const WeldmentResultsPage = () => {
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [totalAssemblies, setTotalAssemblies] = useState(0);
   const { analysisId } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
@@ -37,6 +38,12 @@ const WeldmentResultsPage = () => {
   useEffect(() => {
     if (location.state?.analysisResults?.weldment_pairwise) {
       setResults(location.state.analysisResults.weldment_pairwise);
+      // Get total assemblies from location state if passed
+      if (location.state.totalAssemblies) {
+        setTotalAssemblies(location.state.totalAssemblies);
+      } else if (location.state.analysisResults?.weldment_pairwise?.parameters?.total_assemblies) {
+        setTotalAssemblies(location.state.analysisResults.weldment_pairwise.parameters.total_assemblies);
+      }
       setLoading(false);
     } else if (analysisId) {
       loadAnalysisResults();
@@ -57,6 +64,23 @@ const WeldmentResultsPage = () => {
         raw?.weldment_pairwise_result ||
         data.weldment_pairwise_result;
       setResults(weld || null);
+      
+      // Get total assemblies from the analysis results
+      if (weld?.parameters?.total_assemblies) {
+        setTotalAssemblies(weld.parameters.total_assemblies);
+      } else if (raw?.clustering?.metrics?.n_samples) {
+        setTotalAssemblies(raw.clustering.metrics.n_samples);
+      } else {
+        // Fallback: estimate from pairwise table
+        const assembliesSet = new Set();
+        if (weld?.pairwise_table) {
+          weld.pairwise_table.forEach(row => {
+            if (row.bom_a) assembliesSet.add(row.bom_a);
+            if (row.bom_b) assembliesSet.add(row.bom_b);
+          });
+        }
+        setTotalAssemblies(assembliesSet.size);
+      }
     } catch (err) {
       console.error('Error loading weldment results:', err);
       message.error('Failed to load results');
@@ -373,6 +397,9 @@ const WeldmentResultsPage = () => {
     const avgSavingsPercent = statsBlock.avg_savings_percent || 0;
     const numGroups = statsBlock.num_groups || 0;
     
+    // Calculate assemblies after replacement
+    const assembliesAfterReplacement = Math.max(0, totalAssemblies - totalReplacements);
+    
     // Group savings rows by their group
     const groupsMap = {};
     if (results.cost_savings.rows) {
@@ -397,29 +424,64 @@ const WeldmentResultsPage = () => {
 
         <Card style={{ marginBottom: 20 }}>
           <Row gutter={16} align="middle">
-            <Col xs={24} sm={12} md={6}>
-              <Statistic title="Pairs Above Threshold" value={totalPairs} />
+            <Col xs={24} sm={12} md={4}>
+              <Statistic 
+                title="Total Assemblies" 
+                value={totalAssemblies}
+                valueStyle={{ color: '#1890ff', fontSize: '24px' }}
+              />
             </Col>
-            <Col xs={24} sm={12} md={6}>
-              <Statistic title="Replacement Opportunities" value={totalReplacements} />
+            <Col xs={24} sm={12} md={4}>
+              <Statistic 
+                title="Replacement Opportunities" 
+                value={totalReplacements}
+                valueStyle={{ color: '#faad14', fontSize: '24px' }}
+              />
             </Col>
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={4}>
+              <Statistic
+                title="Assemblies After Replacement"
+                value={assembliesAfterReplacement}
+                valueStyle={{ color: '#52c41a', fontSize: '24px', fontWeight: 'bold' }}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={4}>
               <Statistic
                 title="Total Savings"
                 value={totalSavings}
                 precision={2}
                 prefix="£"
+                valueStyle={{ color: '#52c41a', fontSize: '24px' }}
               />
             </Col>
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={4}>
               <Statistic
                 title="Avg Savings %"
                 value={avgSavingsPercent}
                 precision={2}
                 suffix="%"
+                valueStyle={{ color: '#722ed1', fontSize: '24px' }}
+              />
+            </Col>
+            <Col xs={24} sm={12} md={4}>
+              <Statistic
+                title="Similarity Groups"
+                value={numGroups}
+                valueStyle={{ color: '#13c2c2', fontSize: '24px' }}
               />
             </Col>
           </Row>
+          
+          <div style={{ marginTop: 10, textAlign: 'center', color: '#666', fontSize: '14px' }}>
+            {totalAssemblies > 0 && totalReplacements > 0 && (
+              <div>
+                Optimization reduces {totalReplacements} assemblies → {assembliesAfterReplacement} unique assemblies remain
+                <span style={{ marginLeft: 10, color: '#52c41a', fontWeight: 'bold' }}>
+                  ({Math.round((totalReplacements / totalAssemblies) * 100)}% consolidation)
+                </span>
+              </div>
+            )}
+          </div>
 
           <div style={{ marginTop: 16, textAlign: 'right' }}>
             <Button icon={<DownloadOutlined />} onClick={handleExportCSV}>
