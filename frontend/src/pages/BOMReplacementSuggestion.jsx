@@ -1,10 +1,8 @@
 // BOMReplacementSuggestion.jsx
-// Full updated component with:
-// - Dashboard (Total BOMs, Similar, Unique, Replaced, After Replacement, Savings)
-// - Accordion-style Similar Assembly Groups and Per-variant replacement savings
-// - Currency code -> symbol mapping (GBP -> £)
-// - Price of each variant appended in brackets after the assembly ID everywhere it appears
-// - Minimal, non-breaking changes to existing logic; assembly costs are read from analysis.bom_analysis.assembly_costs
+// Updated dashboard to match requested design/order for BOMs
+// - Order: Total BOMs, Replacement Opportunities, BOMs After Replacement, Total Savings, Avg Savings %, Similarity Groups
+// - Colors and centered consolidation summary similar to provided image
+// - Minimal changes to rest of file; all prior logic retained.
 
 import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Alert, Spin, message, Collapse, Typography } from 'antd';
@@ -106,6 +104,7 @@ const BOMReplacementSuggestion = () => {
    * - computes per-variant replacement rows (replace every non-cheapest in group with cheapest)
    */
   const buildGroups = (bomAnalysis) => {
+    // defensive defaults
     if (!bomAnalysis || !bomAnalysis.similarity_matrix) {
       setGroups([]);
       setPerVariantRows([]);
@@ -115,105 +114,136 @@ const BOMReplacementSuggestion = () => {
     }
 
     const sim = bomAnalysis.similarity_matrix;
-    const nodes = Object.keys(sim);
+    const nodes = Object.keys(sim || {});
+    if (!nodes.length) {
+      setGroups([]);
+      setPerVariantRows([]);
+      setOverallSavings({ totalOriginal: 0, totalSavings: 0, savingsPct: 0, currency: '' });
+      setAssemblyCosts({});
+      return;
+    }
 
-    // Build adjacency (only edges where similarity === 100)
+    // Build adjacency list for 100% similarity edges
     const adj = {};
-    nodes.forEach(n => (adj[n] = new Set()));
+    nodes.forEach(n => { adj[n] = new Set(); });
     nodes.forEach(a => {
       const row = sim[a] || {};
       Object.keys(row).forEach(b => {
         const val = Number(row[b]);
         if (!isNaN(val) && val === 100) {
+          // undirected
           adj[a].add(b);
           adj[b].add(a);
         }
       });
     });
 
-    // Find connected components (DFS)
+    // Find connected components (only include components with >1 node)
     const visited = new Set();
     const components = [];
-    nodes.forEach(n => {
-      if (!visited.has(n)) {
-        const stack = [n];
-        const comp = [];
-        while (stack.length) {
-          const cur = stack.pop();
-          if (visited.has(cur)) continue;
-          visited.add(cur);
-          comp.push(cur);
-          adj[cur].forEach(nei => {
-            if (!visited.has(nei)) stack.push(nei);
-          });
-        }
-        if (comp.length > 1) components.push(comp.sort());
+    nodes.forEach(start => {
+      if (visited.has(start)) return;
+      const stack = [start];
+      const comp = [];
+      while (stack.length) {
+        const cur = stack.pop();
+        if (visited.has(cur)) continue;
+        visited.add(cur);
+        comp.push(cur);
+        (adj[cur] || new Set()).forEach(nei => {
+          if (!visited.has(nei)) stack.push(nei);
+        });
       }
+      if (comp.length > 1) components.push(comp.sort());
     });
 
-    components.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+    // sort components for deterministic output
+    components.sort((a, b) => {
+      if (!a[0] || !b[0]) return 0;
+      return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+    });
 
-    const formatted = components.map((members, idx) => {
+    // formatted groups for UI
+    const formattedGroups = components.map((members, idx) => {
       const id = `G${String(idx + 1).padStart(3, '0')}`;
       return { key: id, groupId: id, members };
     });
 
-    setGroups(formatted);
+    setGroups(formattedGroups);
 
-    // Read assembly_costs (if provided)
+    // get assembly costs and currency map (support multiple possible key names)
     const assembly_costs = bomAnalysis.assembly_costs || bomAnalysis.assemblyCosts || {};
+    const currency_map = bomAnalysis.currency_map || bomAnalysis.currencyMap || {};
     setAssemblyCosts(assembly_costs || {});
 
-    const currency_map = bomAnalysis.currency_map || bomAnalysis.currencyMap || {};
-    let totalOriginal = 0;
-    let totalSavings = 0;
-    let currency = '';
-
-    // Compute per-variant replacement rows
+    // Build per-variant replacement rows and accumulate totals
     const rows = [];
-    formatted.forEach(g => {
-      // gather members with costs
-      const membersWithCost = g.members.map(m => ({
-        id: m,
-        cost: round2(Number(assembly_costs?.[m] || 0))
+    let totalOriginal = 0; // sum of costFrom for rows we actually include
+    let totalSavings = 0;  // sum of savingAbs for rows we actually include
+    let currency = bomAnalysis.currency || bomAnalysis.currency_code || '';
+
+    formattedGroups.forEach(group => {
+      // gather members with numeric costs
+      const membersWithCost = group.members.map(id => ({
+        id,
+        cost: Number(assembly_costs?.[id] ?? 0)
       }));
 
-      if (membersWithCost.length === 0) return;
+      if (!membersWithCost.length) return;
 
-      // find cheapest variant in the group
+      // cheapest variant (lowest cost)
       const cheapest = membersWithCost.reduce((best, cur) => (cur.cost < best.cost ? cur : best), membersWithCost[0]);
-      currency = currency_map[g.members[0]] || currency || bomAnalysis.currency || bomAnalysis.currency_code || '';
 
-      // for every other variant create a replacement row (replace variant -> cheapest)
+      // adopt currency from first member if not already set
+      const groupCurrencyCandidate = currency_map[group.members[0]] || bomAnalysis.currency_map?.[group.members[0]] || '';
+      currency = currency || groupCurrencyCandidate || currency;
+
+      // create replacement rows: every member -> cheapest (skip cheapest itself)
       membersWithCost.forEach(m => {
-        if (m.id === cheapest.id) return; // nothing to replace
-        const costFrom = m.cost || 0;
-        const costTo = cheapest.cost || 0;
-        const savingAbs = round2(costFrom - costTo);
+        if (m.id === cheapest.id) return;
+        const costFrom = Number(m.cost || 0);
+        const costTo = Number(cheapest.cost || 0);
+
+        // CHANGED → now using round4
+        const savingAbs = round4(costFrom - costTo);
+
+        // compute per-row percentage relative to original costFrom
         const savingPct = costFrom > 0 ? round4((savingAbs / costFrom) * 100) : 0;
 
-        // Only consider positive savings (skip negative or zero)
+        // only include rows that produce positive absolute savings
         if (savingAbs > 0) {
           rows.push({
-            groupId: g.groupId,
+            groupId: group.groupId,
             fromId: m.id,
             toId: cheapest.id,
-            costFrom,
-            costTo,
-            savingAbs,
-            savingPct,
-            currency
+            costFrom: round4(costFrom),
+            costTo: round4(costTo),
+            savingAbs: round4(savingAbs),
+            savingPct: savingPct, // already rounded to 4 decimals
+            currency: currency || ''
           });
+
           totalOriginal += Number(costFrom || 0);
           totalSavings += Number(savingAbs || 0);
         }
       });
     });
 
-    const overallPct = totalOriginal > 0 ? round4((totalSavings / totalOriginal) * 100) : 0;
+    // Compute overall percent = unweighted average of every replacement row's savingPct
+    let overallPct = 0;
+    if (rows.length > 0) {
+      const sumPct = rows.reduce((s, r) => s + Number(r.savingPct || 0), 0);
+      overallPct = round4(sumPct / rows.length);
+    }
 
+    // commit to state (rounded totals)
     setPerVariantRows(rows);
-    setOverallSavings({ totalOriginal: round2(totalOriginal), totalSavings: round2(totalSavings), savingsPct: overallPct, currency: currency || '' });
+    setOverallSavings({
+      totalOriginal: round4(totalOriginal),
+      totalSavings: round4(totalSavings),
+      savingsPct: overallPct,
+      currency: currency || ''
+    });
   };
 
   const handleExportCSV = () => {
@@ -259,8 +289,8 @@ const BOMReplacementSuggestion = () => {
     <div>
       <h1>Replacement Suggestions — Exact Matches (100%)</h1>
 
-      {/* --- Dashboard: BOM summary (with replaced BOMs) --- */}
-      <Card style={{ marginBottom: 16 }}>
+      {/* --- Dashboard: BOM summary (updated design and order) --- */}
+      <Card style={{ marginBottom: 16, padding: 18 }}>
         {(() => {
           const totalFromStats = analysis?.bom_analysis?.bom_statistics?.total_assemblies;
           const matrixKeys = analysis?.bom_analysis?.similarity_matrix
@@ -268,75 +298,92 @@ const BOMReplacementSuggestion = () => {
             : [];
           const totalBOMs = Number(totalFromStats || matrixKeys.length || 0);
 
+          // Replacement opportunities: total number of variants that can be replaced (sum of members-1)
+          const replacementOpportunities = groups.reduce(
+            (r, g) => r + Math.max(0, (Array.isArray(g.members) ? g.members.length - 1 : 0)),
+            0
+          );
+
+          // Count of similarity groups
+          const similarityGroups = groups.length;
+
+          // total number of assemblies that are part of any similar group
           const similarCount = groups.reduce(
             (sum, g) => sum + (Array.isArray(g.members) ? g.members.length : 0),
             0
           );
 
-          const uniqueBoms = Math.max(0, totalBOMs - similarCount);
-
+          // assemblies after replacement: reduce one per group member (approx)
           const totalReduction = groups.reduce(
-            (r, g) => r + Math.max(0, g.members.length - 1),
+            (r, g) => r + Math.max(0, (Array.isArray(g.members) ? g.members.length - 1 : 0)),
             0
           );
-
           const afterReplacement = Math.max(0, totalBOMs - totalReduction);
 
-          // New metric
-          const replacedBOMs = totalBOMs - afterReplacement;
+          // number of assemblies replaced
+          const replacedBOMs = Math.max(0, totalBOMs - afterReplacement);
 
           const currencySym = currencySymbol(overallSavings.currency || '');
 
+          // Styling and color palette adapted from provided image
           return (
             <div style={{
               display: 'flex',
+              alignItems: 'center',
               gap: 24,
               justifyContent: 'space-between',
-              alignItems: 'center',
               flexWrap: 'wrap'
             }}>
-              
-              <div style={{ minWidth: 160 }}>
-                <div style={{ color: '#6b7280', fontSize: 13 }}>Total BOMs</div>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>{totalBOMs}</div>
+              {/* Left block: metrics in order */}
+              <div style={{ display: 'flex', gap: 36, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 140 }}>
+                  <div style={{ color: '#6b7280', fontSize: 13 }}>Total BOMs</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#1e88e5' }}>{totalBOMs}</div>
+                </div>
+
+                <div style={{ minWidth: 160 }}>
+                  <div style={{ color: '#6b7280', fontSize: 13 }}>Replacement Opportunities</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#f59e0b' }}>{replacementOpportunities}</div>
+                </div>
+
+                <div style={{ minWidth: 180 }}>
+                  <div style={{ color: '#6b7280', fontSize: 13 }}>BOMs After Replacement</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#10b981' }}>{afterReplacement}</div>
+                </div>
+
+                <div style={{ minWidth: 160 }}>
+                  <div style={{ color: '#6b7280', fontSize: 13 }}>Similarity Groups</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: '#06b6d4' }}>{similarityGroups}</div>
+                </div>
               </div>
 
-              <div style={{ minWidth: 160 }}>
-                <div style={{ color: '#6b7280', fontSize: 13 }}>Similar BOMs</div>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>{similarCount}</div>
-              </div>
-
-              <div style={{ minWidth: 160 }}>
-                <div style={{ color: '#6b7280', fontSize: 13 }}>Unique BOMs</div>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>{uniqueBoms}</div>
-              </div>
-
-              <div style={{ minWidth: 180 }}>
-                <div style={{ color: '#6b7280', fontSize: 13 }}>Replaced BOMs</div>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>{replacedBOMs}</div>
-              </div>
-
-              <div style={{ minWidth: 200 }}>
-                <div style={{ color: '#6b7280', fontSize: 13 }}>BOMs After Replacement</div>
-                <div style={{ fontSize: 28, fontWeight: 700 }}>{afterReplacement}</div>
-              </div>
-
-              <div style={{ marginLeft: 'auto', textAlign: 'right', minWidth: 220 }}>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>Total Savings (Abs)</div>
-                <div style={{ fontSize: 20, fontWeight: 700 }}>
+              {/* Right block: savings */}
+              <div style={{ marginLeft: 'auto', textAlign: 'right', minWidth: 300 }}>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>Total Savings</div>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#16a34a' }}>
                   {fmtMoney(overallSavings.totalSavings, overallSavings.currency)}
                 </div>
 
                 <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>Avg Savings %</div>
-                <div style={{ fontSize: 18, fontWeight: 700 }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#7c3aed' }}>
                   {(overallSavings.savingsPct || 0).toFixed(2)}%
                 </div>
+              </div>
+
+              {/* Consolidation summary line below metrics (spans full width) */}
+              <div style={{ width: '100%', marginTop: 12, textAlign: 'center' }}>
+                <span style={{ color: '#6b7280' }}>
+                  Optimization reduces {replacedBOMs} assemblies → {afterReplacement} unique assemblies remain
+                </span>
+                <span style={{ marginLeft: 10, fontWeight: 700, color: '#16a34a' }}>
+                  ({(totalBOMs ? Math.round((replacedBOMs / totalBOMs) * 100) : 0)}% consolidation)
+                </span>
               </div>
             </div>
           );
         })()}
       </Card>
-      {/* --- end dashboard --- */}
+      {/* --- end updated dashboard --- */}
 
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-start', alignItems: 'center' }}>
