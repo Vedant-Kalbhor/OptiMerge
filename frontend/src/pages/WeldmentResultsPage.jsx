@@ -13,7 +13,7 @@ import {
   Col,
   Collapse
 } from 'antd';
-import { DownloadOutlined } from '@ant-design/icons';
+import { DownloadOutlined, BarChartOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
@@ -422,11 +422,30 @@ const WeldmentResultsPage = () => {
       <div>
         <h1>Weldment One-to-One Comparison (with Cost & EAU)</h1>
 
+        {/* Added row with threshold and pairs info */}
+        <Row gutter={16} style={{ marginBottom: 18 }}>
+          <Col span={8}>
+            <Card>
+              <div style={{ fontSize: 18 }}>
+                <BarChartOutlined style={{ marginRight: 6 }} />
+                Threshold: {results?.parameters?.threshold_percent ?? '-'} %
+              </div>
+            </Card>
+          </Col>
+          <Col span={8}>
+            <Card>
+              <div style={{ fontSize: 18 }}>
+                Pairs Above Threshold: {results?.statistics?.pair_count ?? (results?.pairwise_table?.length || 0)}
+              </div>
+            </Card>
+          </Col>
+        </Row>
+
         <Card style={{ marginBottom: 20 }}>
           <Row gutter={16} align="middle">
             <Col xs={24} sm={12} md={4}>
               <Statistic 
-                title="Total Assemblies" 
+                title="Total Weldments" 
                 value={totalAssemblies}
                 valueStyle={{ color: '#1890ff', fontSize: '24px' }}
               />
@@ -440,7 +459,7 @@ const WeldmentResultsPage = () => {
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Statistic
-                title="Assemblies After Replacement"
+                title="Weldments After Replacement"
                 value={assembliesAfterReplacement}
                 valueStyle={{ color: '#52c41a', fontSize: '24px', fontWeight: 'bold' }}
               />
@@ -465,7 +484,7 @@ const WeldmentResultsPage = () => {
             </Col>
             <Col xs={24} sm={12} md={4}>
               <Statistic
-                title="Similarity Groups"
+                title="Similar Groups"
                 value={numGroups}
                 valueStyle={{ color: '#13c2c2', fontSize: '24px' }}
               />

@@ -826,7 +826,7 @@ const PreviousAnalysisPage = () => {
               <Card>
                 <div style={{ fontSize: 18 }}>
                   <BarChartOutlined style={{ marginRight: 6 }} />
-                  Threshold: {weld?.parameters?.threshold_percent ?? '-'}
+                  Threshold: {weld?.parameters?.threshold_percent ?? '-'} %
                 </div>
               </Card>
             </Col>
@@ -844,7 +844,7 @@ const PreviousAnalysisPage = () => {
             <Row gutter={16} align="middle">
               <Col xs={24} sm={12} md={4}>
                 <Statistic
-                  title="Total Assemblies"
+                  title="Total Weldments"
                   value={totalAssemblies}
                   valueStyle={{ color: '#1890ff', fontSize: '24px' }}
                 />
@@ -858,7 +858,7 @@ const PreviousAnalysisPage = () => {
               </Col>
               <Col xs={24} sm={12} md={4}>
                 <Statistic
-                  title="Assemblies After Replacement"
+                  title="Weldments After Replacement"
                   value={assembliesAfterReplacement}
                   valueStyle={{ color: '#52c41a', fontSize: '24px', fontWeight: 'bold' }}
                 />
@@ -883,7 +883,7 @@ const PreviousAnalysisPage = () => {
               </Col>
               <Col xs={24} sm={12} md={4}>
                 <Statistic
-                  title="Similarity Groups"
+                  title="Similar Groups"
                   value={numGroups}
                   valueStyle={{ color: '#13c2c2', fontSize: '24px' }}
                 />
