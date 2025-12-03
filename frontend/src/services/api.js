@@ -46,6 +46,20 @@ api.interceptors.response.use(
   }
 );
 
+// Add token to requests if available
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 // Weldment endpoints
 export const uploadWeldments = async (formData) => {
   try {
@@ -159,7 +173,20 @@ export const analyzeWeldmentPairwise = async (data) => {
   }
 };
 
-
-
+export const calculateBOMSavings = async (formData) => {
+  try {
+    console.log('Calculating BOM savings...');
+    const response = await api.post('/calculate-bom-savings/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 120000,
+    });
+    return response;
+  } catch (error) {
+    console.error('Calculate BOM savings error:', error);
+    throw error;
+  }
+};
 
 export default api;

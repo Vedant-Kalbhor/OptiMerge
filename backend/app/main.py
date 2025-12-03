@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, status,Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer
@@ -7,11 +7,13 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
-
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import logging
+import json
+from typing import List, Dict, Any
 
 from .db import analysis_collection, users_collection, ensure_indexes
 
@@ -513,6 +515,198 @@ async def analyze_bom_similarity(request: dict):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"BOM analysis failed: {str(e)}")
+
+
+# Add this new endpoint before the root endpoint (@app.get("/"))
+@app.post("/calculate-bom-savings/")
+async def calculate_bom_savings(
+    file: UploadFile = File(...),
+    analysis_id: str = Form(...),
+    replacements: str = Form(...)
+):
+    """
+    Calculate BOM savings by applying weldment replacements to assemblies.
+    
+    Args:
+        file: BOM file with columns: Component, Lev, Quantity, Std price, Crcy
+        analysis_id: ID of the weldment analysis containing replacements
+        replacements: JSON string of replacement suggestions from weldment analysis
+    """
+    try:
+        # Parse replacements from JSON string
+        replacement_list = json.loads(replacements)
+        
+        # Create a mapping of old component to new component and price difference
+        replacement_map = {}
+        for rep in replacement_list:
+            old_component = rep.get('oldComponent') or rep.get('bom_a')
+            new_component = rep.get('newComponent') or rep.get('bom_b')
+            old_price = float(rep.get('oldPrice') or rep.get('cost_a') or 0)
+            new_price = float(rep.get('newPrice') or rep.get('cost_b') or 0)
+            price_diff = old_price - new_price
+            
+            if old_component and new_component and price_diff > 0:
+                replacement_map[old_component] = {
+                    'new_component': new_component,
+                    'old_price': old_price,
+                    'new_price': new_price,
+                    'price_diff': price_diff
+                }
+        
+        if not replacement_map:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": "No valid replacements found in analysis"}
+            )
+        
+        # Read the uploaded file
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(file.file)
+        else:
+            df = pd.read_excel(file.file)
+        
+        # Clean column names (strip whitespace, make lowercase)
+        df.columns = df.columns.str.strip().str.lower()
+        
+        # Rename columns to expected format
+        column_mapping = {
+            'component': 'component',
+            'lev': 'lev',
+            'quantity': 'quantity',
+            'std price': 'std_price',
+            'crcy': 'currency'
+        }
+        
+        for old_col, new_col in column_mapping.items():
+            if old_col in df.columns:
+                df.rename(columns={old_col: new_col}, inplace=True)
+        
+        # Check required columns
+        required_cols = ['component', 'lev', 'quantity', 'std_price', 'currency']
+        missing_cols = [col for col in required_cols if col not in df.columns]
+        
+        if missing_cols:
+            return JSONResponse(
+                status_code=400,
+                content={"detail": f"Missing required columns: {missing_cols}"}
+            )
+        
+        # Convert numeric columns
+        df['lev'] = pd.to_numeric(df['lev'], errors='coerce')
+        df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce')
+        
+        # Clean price column (remove commas, convert to float)
+        if df['std_price'].dtype == 'object':
+            df['std_price'] = df['std_price'].astype(str).str.replace(',', '')
+        df['std_price'] = pd.to_numeric(df['std_price'], errors='coerce')
+        
+        # Get assemblies (Lev=0)
+        assemblies = df[df['lev'] == 0].copy()
+        
+        # Get components (Lev=1)
+        components = df[df['lev'] == 1].copy()
+        
+        # Group components by their parent assembly
+        # Find parent assembly for each component
+        assembly_map = {}
+        current_assembly = None
+        
+        for _, row in df.iterrows():
+            if row['lev'] == 0:
+                current_assembly = row['component']
+                assembly_map[current_assembly] = {
+                    'assembly_code': current_assembly,
+                    'component': None,
+                    'quantity': row['quantity'],
+                    'original_price': row['std_price'],
+                    'currency': row['currency'],
+                    'components': []
+                }
+            elif row['lev'] == 1 and current_assembly:
+                assembly_map[current_assembly]['components'].append({
+                    'component': row['component'],
+                    'quantity': row['quantity'],
+                    'price': row['std_price'],
+                    'currency': row['currency']
+                })
+        
+        # Calculate savings for each assembly
+        results = []
+        total_savings = 0
+        total_cost_before = 0
+        assemblies_with_savings = 0
+        
+        for assembly_code, assembly_data in assembly_map.items():
+            components_list = assembly_data['components']
+            assembly_price_before = assembly_data['original_price']
+            
+            # Calculate component-level savings
+            component_savings = 0
+            replaced_components = []
+            
+            for comp in components_list:
+                comp_code = comp['component']
+                comp_qty = comp['quantity']
+                comp_price = comp['price']
+                
+                # Check if this component has a replacement
+                if comp_code in replacement_map:
+                    replacement = replacement_map[comp_code]
+                    savings = replacement['price_diff'] * comp_qty
+                    component_savings += savings
+                    replaced_components.append(
+                        f"{comp_code} → {replacement['new_component']}: £{savings:.2f}"
+                    )
+            
+            assembly_price_after = assembly_price_before - component_savings
+            savings_percent = (component_savings / assembly_price_before * 100) if assembly_price_before > 0 else 0
+            
+            total_cost_before += assembly_price_before
+            total_savings += component_savings
+            
+            if component_savings > 0:
+                assemblies_with_savings += 1
+            
+            results.append({
+                'assembly_code': assembly_code,
+                'component': assembly_data.get('component'),
+                'quantity': assembly_data['quantity'],
+                'original_price': float(assembly_price_before),
+                'currency': assembly_data['currency'],
+                'replaced_components': replaced_components,
+                'total_before': float(assembly_price_before),
+                'total_after': float(assembly_price_after),
+                'savings': float(component_savings),
+                'savings_percent': float(savings_percent)
+            })
+        
+        total_cost_after = total_cost_before - total_savings
+        avg_savings_percent = (total_savings / total_cost_before * 100) if total_cost_before > 0 else 0
+        
+        summary = {
+            'total_assemblies': len(results),
+            'assemblies_with_savings': assemblies_with_savings,
+            'total_cost_before': float(total_cost_before),
+            'total_cost_after': float(total_cost_after),
+            'total_savings': float(total_savings),
+            'avg_savings_percent': float(avg_savings_percent),
+            'total_replacements_applied': len(replacement_map)
+        }
+        
+        return {
+            'analysis_id': analysis_id,
+            'assemblies': results,
+            'summary': summary,
+            'replacement_map': replacement_map
+        }
+        
+    except Exception as e:
+        print(f"Error calculating BOM savings: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to calculate savings: {str(e)}")
+
+
 
 
 # -------------------------

@@ -11,9 +11,10 @@ import {
   Statistic,
   Row,
   Col,
-  Collapse
+  Collapse,
+  Space
 } from 'antd';
-import { DownloadOutlined, BarChartOutlined } from '@ant-design/icons';
+import { DownloadOutlined, BarChartOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
@@ -38,7 +39,6 @@ const WeldmentResultsPage = () => {
   useEffect(() => {
     if (location.state?.analysisResults?.weldment_pairwise) {
       setResults(location.state.analysisResults.weldment_pairwise);
-      // Get total assemblies from location state if passed
       if (location.state.totalAssemblies) {
         setTotalAssemblies(location.state.totalAssemblies);
       } else if (location.state.analysisResults?.weldment_pairwise?.parameters?.total_assemblies) {
@@ -65,13 +65,11 @@ const WeldmentResultsPage = () => {
         data.weldment_pairwise_result;
       setResults(weld || null);
       
-      // Get total assemblies from the analysis results
       if (weld?.parameters?.total_assemblies) {
         setTotalAssemblies(weld.parameters.total_assemblies);
       } else if (raw?.clustering?.metrics?.n_samples) {
         setTotalAssemblies(raw.clustering.metrics.n_samples);
       } else {
-        // Fallback: estimate from pairwise table
         const assembliesSet = new Set();
         if (weld?.pairwise_table) {
           weld.pairwise_table.forEach(row => {
@@ -100,7 +98,6 @@ const WeldmentResultsPage = () => {
       if (hasCostSavings) {
         const savingsRows = results.cost_savings.rows || [];
         
-        // Group savings by assembly groups (for summary)
         const groups = {};
         savingsRows.forEach(row => {
           const groupKey = row.group_members?.sort().join(',') || row.bom_a;
@@ -114,7 +111,6 @@ const WeldmentResultsPage = () => {
           groups[groupKey].rows.push(row);
         });
 
-        // Export with group information
         const header = [
           'Group ID',
           'Group Members',
@@ -135,7 +131,6 @@ const WeldmentResultsPage = () => {
 
         const csvRows = [header.join(',')];
         
-        // Add group summary first
         Object.entries(groups).forEach(([groupKey, group], idx) => {
           const groupTotalSavings = group.rows.reduce((sum, r) => sum + (r.cost_savings || 0), 0);
           csvRows.push([
@@ -146,7 +141,6 @@ const WeldmentResultsPage = () => {
             groupTotalSavings.toFixed(2)
           ].join(','));
           
-          // Then add individual rows
           group.rows.forEach(row => {
             csvRows.push([
               `Group ${idx + 1}`,
@@ -174,7 +168,6 @@ const WeldmentResultsPage = () => {
         return;
       }
 
-      // Legacy export (no cost data)
       const header = [
         'Assembly A',
         'Assembly B',
@@ -200,6 +193,10 @@ const WeldmentResultsPage = () => {
       console.error(err);
       message.error('Export failed');
     }
+  };
+
+  const handleNavigateToBOMSavings = () => {
+    navigate(`/calculate-bom-savings/${analysisId}`);
   };
 
   const columns = [
@@ -397,10 +394,8 @@ const WeldmentResultsPage = () => {
     const avgSavingsPercent = statsBlock.avg_savings_percent || 0;
     const numGroups = statsBlock.num_groups || 0;
     
-    // Calculate assemblies after replacement
     const assembliesAfterReplacement = Math.max(0, totalAssemblies - totalReplacements);
     
-    // Group savings rows by their group
     const groupsMap = {};
     if (results.cost_savings.rows) {
       results.cost_savings.rows.forEach(row => {
@@ -422,7 +417,6 @@ const WeldmentResultsPage = () => {
       <div>
         <h1>Weldment One-to-One Comparison (with Cost & EAU)</h1>
 
-        {/* Added row with threshold and pairs info */}
         <Row gutter={16} style={{ marginBottom: 18 }}>
           <Col span={8}>
             <Card>
@@ -503,13 +497,21 @@ const WeldmentResultsPage = () => {
           </div>
 
           <div style={{ marginTop: 16, textAlign: 'right' }}>
-            <Button icon={<DownloadOutlined />} onClick={handleExportCSV}>
-              Export CSV (with groups)
-            </Button>
+            <Space>
+              <Button icon={<DownloadOutlined />} onClick={handleExportCSV}>
+                Export CSV (with groups)
+              </Button>
+              <Button 
+                type="primary" 
+                icon={<CalculatorOutlined />}
+                onClick={handleNavigateToBOMSavings}
+              >
+                Calculate BOM Savings
+              </Button>
+            </Space>
           </div>
         </Card>
 
-        {/* Display groups */}
         {numGroups > 0 && (
           <Card title="Similar Assembly Groups" style={{ marginBottom: 20 }}>
             <Collapse>
@@ -568,7 +570,6 @@ const WeldmentResultsPage = () => {
     );
   }
 
-  // Legacy layout (no cost/EAU columns)
   return (
     <div>
       <h1>Weldment One-to-One Comparison</h1>

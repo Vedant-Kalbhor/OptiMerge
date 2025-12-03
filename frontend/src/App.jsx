@@ -5,7 +5,7 @@ import {
   Route,
   Navigate,
 } from 'react-router-dom';
-import { Layout, ConfigProvider, App as AntdApp } from 'antd';
+import { Layout, ConfigProvider, App as AntdApp, Button } from 'antd'; // Added Button import
 
 import Sidebar from './components/Sidebar';
 import Dashboard from './pages/Dashboard';
@@ -19,6 +19,7 @@ import BOMComparePage from './pages/BOMComparePage';
 import BOMReplacementSuggestion from './pages/BOMReplacementSuggestion';
 import LoginPage from './pages/LoginPage';
 import SignupPage from './pages/SignupPage';
+import BOMSavingsCalculator from './pages/BOMSavingsCalculator';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 import './App.css';
@@ -37,7 +38,6 @@ function PrivateRoute({ children }) {
 }
 
 function App() {
-  // NEW: sidebar collapsed state
   const [collapsed, setCollapsed] = useState(false);
   const toggleCollapse = () => setCollapsed(prev => !prev);
 
@@ -54,8 +54,8 @@ function App() {
 
               {/* SIDE NAV */}
               <Sider
-                collapsible={false}     // we control collapse manually
-                collapsed={collapsed}   // NEW
+                collapsible={false}
+                collapsed={collapsed}
                 width={250}
                 collapsedWidth={70}
                 style={{ background: '#001529' }}
@@ -72,9 +72,19 @@ function App() {
                     borderBottom: '1px solid #f0f0f0',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'space-between'
                   }}
                 >
                   <h1 style={{ margin: 0, color: '#1890ff' }}>OptiMerge</h1>
+                  <div>
+                    <Button 
+                      type="text" 
+                      onClick={() => setCollapsed(!collapsed)}
+                      style={{ marginRight: 16 }}
+                    >
+                      {collapsed ? '→' : '←'}
+                    </Button>
+                  </div>
                 </Header>
 
                 <Content
@@ -83,14 +93,15 @@ function App() {
                     background: '#fff',
                     padding: '20px',
                     borderRadius: '20px',
+                    overflow: 'auto'
                   }}
                 >
                   <Routes>
-                    {/* Public */}
+                    {/* Public routes */}
                     <Route path="/login" element={<LoginPage />} />
                     <Route path="/signup" element={<SignupPage />} />
 
-                    {/* Protected */}
+                    {/* Protected routes */}
                     <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
                     <Route path="/upload" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
                     <Route path="/analysis" element={<PrivateRoute><AnalysisPage /></PrivateRoute>} />
@@ -100,9 +111,9 @@ function App() {
                     <Route path="/results/weldment/:analysisId" element={<PrivateRoute><WeldmentResultsPage /></PrivateRoute>} />
                     <Route path="/results/bom/compare/:bomA/:bomB" element={<PrivateRoute><BOMComparePage /></PrivateRoute>} />
                     <Route path="/results/bom/replacements" element={<PrivateRoute><BOMReplacementSuggestion /></PrivateRoute>} />
-                    {/* // path="/results/bom/replacements/:analysisId/:bomA/:bomB"*/}
+                    <Route path="/calculate-bom-savings/:analysisId" element={<PrivateRoute><BOMSavingsCalculator /></PrivateRoute>} />
 
-                    {/* Fallback */}
+                    {/* Fallback route */}
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
                 </Content>
