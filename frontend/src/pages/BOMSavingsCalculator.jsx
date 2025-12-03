@@ -417,9 +417,9 @@ const BOMSavingsCalculator = () => {
                 <Tag color="blue">Std price</Tag>
                 <Tag color="blue">Crcy</Tag>
               </Space>
-              <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>
+              {/* <Text type="secondary" style={{ marginTop: 8, display: 'block' }}>
                 Note: Files should have Lev=0 for assemblies and Lev=1 for components/weldments
-              </Text>
+              </Text> */}
             </Space>
           </Card>
         </Col>

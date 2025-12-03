@@ -12,13 +12,15 @@ import {
   Modal,
   message,
   Statistic,
-  Collapse
+  Collapse,
+  Space
 } from 'antd';
 import {
   DownloadOutlined,
   EyeOutlined,
   ClusterOutlined,
-  BarChartOutlined
+  BarChartOutlined,
+  CalculatorOutlined
 } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import ClusterChart from '../components/ClusterChart';
@@ -153,73 +155,81 @@ const PreviousAnalysisPage = () => {
       // If cost savings present, export enriched CSV (same structure as WeldmentResultsPage)
       if (hasCostSavings) {
         const savingsRows = weld.cost_savings.rows || [];
+        
+        // Group savings by assembly groups (for summary)
+        const groups = {};
+        savingsRows.forEach(row => {
+          const groupKey = row.group_members?.sort().join(',') || row.bom_a;
+          if (!groups[groupKey]) {
+            groups[groupKey] = {
+              members: row.group_members || [row.bom_a, row.bom_b],
+              cheapest: row.recommended_assembly,
+              rows: []
+            };
+          }
+          groups[groupKey].rows.push(row);
+        });
+
         const header = [
-          'Assembly A',
-          'Assembly B',
+          'Group ID',
+          'Group Members',
+          'Cheapest Assembly',
+          'Assembly A (Old)',
+          'Assembly B (New)',
           'Match %',
-          'Matching Columns',
           'Cost A',
           'EAU A',
           'Cost B',
-          'EAU B',
-          'Old Price',
-          'New Price',
           'Old-New Price',
-          'Effective EAU',
-          'Recommended Assembly',
-          'Recommended Cost',
+          'EAU (Replaced)',
           'Total Cost Before',
           'Total Cost After',
           'Cost Savings',
           'Savings %'
         ];
 
-        const keyFn = (a, b) => `${a}__${b}`;
-        const costMap = {};
-        savingsRows.forEach((r) => {
-          const k1 = keyFn(r.bom_a, r.bom_b);
-          const k2 = keyFn(r.bom_b, r.bom_a);
-          costMap[k1] = r;
-          costMap[k2] = r;
+        const csvRows = [header.join(',')];
+        
+        // Add group summary first
+        Object.entries(groups).forEach(([groupKey, group], idx) => {
+          const groupTotalSavings = group.rows.reduce((sum, r) => sum + (r.cost_savings || 0), 0);
+          csvRows.push([
+            `Group ${idx + 1}`,
+            `"${group.members.join(', ')}"`,
+            group.cheapest,
+            '', '', '', '', '', '', '', '', '', '', '',
+            groupTotalSavings.toFixed(2)
+          ].join(','));
+          
+          // Then add individual rows
+          group.rows.forEach(row => {
+            csvRows.push([
+              `Group ${idx + 1}`,
+              `"${row.group_members?.join(', ') || [row.bom_a, row.bom_b].join(', ')}"`,
+              row.recommended_assembly,
+              row.bom_a,
+              row.bom_b,
+              row.match_percentage?.toFixed(1) || '100.0',
+              row.cost_a?.toFixed(2) || '',
+              row.eau_a || '',
+              row.cost_b?.toFixed(2) || '',
+              row.old_new_price?.toFixed(2) || '',
+              row.effective_eau || '',
+              row.total_cost_before?.toFixed(2) || '',
+              row.total_cost_after?.toFixed(2) || '',
+              row.cost_savings?.toFixed(2) || '',
+              row.savings_percent?.toFixed(2) || ''
+            ].join(','));
+          });
         });
 
-        const csvRows = [
-          header.join(','),
-          ...rows.map((r) => {
-            const pairKey = keyFn(r.bom_a, r.bom_b);
-            const c = costMap[pairKey] || {};
-            return [
-              `"${(r.bom_a || '').replace(/"/g, '""')}"`,
-              `"${(r.bom_b || '').replace(/"/g, '""')}"`,
-              `${r.match_percentage ?? 0}`,
-              `"${(r.matching_columns || []).join('; ').replace(/"/g, '""')}"`,
-              c.cost_a ?? '',
-              c.eau_a ?? '',
-              c.cost_b ?? '',
-              c.eau_b ?? '',
-              c.old_price ?? '',
-              c.new_price ?? '',
-              c.old_new_price ?? '',
-              c.effective_eau ?? '',
-              c.recommended_assembly
-                ? `"${String(c.recommended_assembly).replace(/"/g, '""')}"`
-                : '',
-              c.recommended_cost ?? '',
-              c.total_cost_before ?? '',
-              c.total_cost_after ?? '',
-              c.cost_savings ?? '',
-              c.savings_percent ?? ''
-            ].join(',');
-          })
-        ].join('\n');
-
-        const blob = new Blob([csvRows], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `weldment-pairwise-cost-${analysisId || 'latest'}.csv`);
-        message.success('Exported CSV with cost savings');
+        const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        saveAs(blob, `weldment-pairwise-groups-${analysisId || 'latest'}.csv`);
+        message.success('Exported CSV with grouped savings');
         return;
       }
 
-      // Legacy export (no cost data) – original behavior
+      // Legacy export (no cost data)
       const header = [
         'Assembly A',
         'Assembly B',
@@ -228,7 +238,7 @@ const PreviousAnalysisPage = () => {
       ];
       const csvRows = [
         header.join(','),
-        ...rows.map((r) =>
+        ...rows.map(r =>
           [
             `"${(r.bom_a || '').replace(/"/g, '""')}"`,
             `"${(r.bom_b || '').replace(/"/g, '""')}"`,
@@ -245,6 +255,10 @@ const PreviousAnalysisPage = () => {
       console.error(err);
       message.error('Export failed');
     }
+  };
+
+  const handleNavigateToBOMSavings = () => {
+    navigate(`/calculate-bom-savings/${analysisId}`);
   };
 
   // --- BOM helpers ---
@@ -821,7 +835,6 @@ const PreviousAnalysisPage = () => {
 
           {/* original top metrics row (unchanged) */}
           <Row gutter={16} style={{ marginBottom: 18 }}>
-            
             <Col span={8}>
               <Card>
                 <div style={{ fontSize: 18 }}>
@@ -902,12 +915,21 @@ const PreviousAnalysisPage = () => {
             </div>
 
             <div style={{ marginTop: 16, textAlign: 'right' }}>
-              <Button
-                icon={<DownloadOutlined />}
-                onClick={() => handleExportWeldmentCSV(weld)}
-              >
-                Export CSV (with cost)
-              </Button>
+              <Space>
+                <Button
+                  icon={<DownloadOutlined />}
+                  onClick={() => handleExportWeldmentCSV(weld)}
+                >
+                  Export CSV (with cost)
+                </Button>
+                <Button 
+                  type="primary" 
+                  icon={<CalculatorOutlined />}
+                  onClick={handleNavigateToBOMSavings}
+                >
+                  Calculate BOM Savings
+                </Button>
+              </Space>
             </div>
           </Card>
 
