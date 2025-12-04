@@ -169,6 +169,7 @@ const BOMReplacementSuggestion = () => {
       return { key: id, groupId: id, members };
     });
 
+    
     setGroups(formattedGroups);
 
     // get assembly costs and currency map (support multiple possible key names)
@@ -181,6 +182,7 @@ const BOMReplacementSuggestion = () => {
     let totalOriginal = 0; // sum of costFrom for rows we actually include
     let totalSavings = 0;  // sum of savingAbs for rows we actually include
     let currency = bomAnalysis.currency || bomAnalysis.currency_code || '';
+    
 
     formattedGroups.forEach(group => {
       // gather members with numeric costs
@@ -209,7 +211,7 @@ const BOMReplacementSuggestion = () => {
 
         // compute per-row percentage relative to original costFrom
         const savingPct = costFrom > 0 ? round4((savingAbs / costFrom) * 100) : 0;
-
+        
         // only include rows that produce positive absolute savings
         if (savingAbs > 0) {
           rows.push({
@@ -236,11 +238,15 @@ const BOMReplacementSuggestion = () => {
       overallPct = round4(sumPct / rows.length);
     }
 
+    const avgAbsSavings = rows.length > 0
+      ? round4(totalSavings / rows.length)
+      : 0;
     // commit to state (rounded totals)
     setPerVariantRows(rows);
     setOverallSavings({
       totalOriginal: round4(totalOriginal),
-      totalSavings: round4(totalSavings),
+      totalSavings: round4(totalSavings),   // keep for export & other visuals
+      avgAbsSavings: avgAbsSavings,         // NEW FIELD
       savingsPct: overallPct,
       currency: currency || ''
     });
@@ -359,10 +365,11 @@ const BOMReplacementSuggestion = () => {
 
               {/* Right block: savings */}
               <div style={{ marginLeft: 'auto', textAlign: 'right', minWidth: 300 }}>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>Total Savings</div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>Average Savings</div>
                 <div style={{ fontSize: 22, fontWeight: 800, color: '#16a34a' }}>
-                  {fmtMoney(overallSavings.totalSavings, overallSavings.currency)}
-                </div>
+                  {fmtMoney(overallSavings.avgAbsSavings, overallSavings.currency)}
+              </div>
+
 
                 <div style={{ marginTop: 8, fontSize: 12, color: '#6b7280' }}>Avg Savings %</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: '#7c3aed' }}>
