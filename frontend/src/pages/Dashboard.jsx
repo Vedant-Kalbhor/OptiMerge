@@ -182,7 +182,7 @@ const Dashboard = () => {
 
       {stats.weldmentFiles === 0 && stats.bomFiles === 0 ? (
         <Alert
-          message="Get Started with BOM Optimization"
+          message="Get Started with OptiMerge"
           description="Upload your weldment dimensions and BOM files to start analyzing variant reduction opportunities."
           type="info"
           showIcon
