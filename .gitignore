@@ -75,3 +75,4 @@ frontend/.idea/
 
 .vscode/
 .idea/
+**pycache**
