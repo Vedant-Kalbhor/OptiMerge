@@ -13,7 +13,7 @@ import uuid
 load_dotenv()
 
 # ── Connection ────────────────────────────────────────────────────────────────
-SQL_URL = os.getenv("PGSQL_URI")   
+SQL_URL = os.getenv("MYSQL_URI")   
 DB_NAME   = os.getenv("DB_NAME", "optimerge")
 
 if not SQL_URL:
@@ -26,7 +26,7 @@ engine = create_engine(
     max_overflow=20,
     pool_pre_ping=True,
     echo=False,
-    connect_args={"sslmode": "require"}, # For NeonDB
+    # connect_args={"sslmode": "require"}, # For NeonDB
 )
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
