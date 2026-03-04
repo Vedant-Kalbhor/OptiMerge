@@ -1,0 +1,27 @@
+﻿mysqld.exe : 2026-03-04T15:32:32.023264Z 0 [Warning] [MY-010091] 
+[Server] Can't create test file C:\ProgramData\MySQL\MySQL Server 
+8.0\Data\mysqld_tmp_file_case_insensitive_test.lower-test
+At line:1 char:1
++ & "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld.exe" --defaults 
+...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (2026-03-04T15:3...test.low 
+   er-test:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+2026-03-04T15:32:32.023316Z 0 [System] [MY-010116] [Server] C:\Program 
+Files\MySQL\MySQL Server 8.0\bin\mysqld.exe (mysqld 8.0.40) starting as 
+process 25012
+2026-03-04T15:32:32.025423Z 0 [Warning] [MY-010091] [Server] Can't 
+create test file C:\ProgramData\MySQL\MySQL Server 
+8.0\Data\mysqld_tmp_file_case_insensitive_test.lower-test
+2026-03-04T15:32:32.025535Z 0 [Warning] [MY-010091] [Server] Can't 
+create test file C:\ProgramData\MySQL\MySQL Server 
+8.0\Data\mysqld_tmp_file_case_insensitive_test.lower-test
+2026-03-04T15:32:32.025684Z 0 [ERROR] [MY-013276] [Server] Failed to 
+set datadir to 'C:\ProgramData\MySQL\MySQL Server 8.0\Data\' (OS errno: 
+13 - Permission denied)
+2026-03-04T15:32:32.025741Z 0 [ERROR] [MY-010119] [Server] Aborting
+2026-03-04T15:32:32.025882Z 0 [System] [MY-010910] [Server] C:\Program 
+Files\MySQL\MySQL Server 8.0\bin\mysqld.exe: Shutdown complete (mysqld 
+8.0.40)  MySQL Community Server - GPL.

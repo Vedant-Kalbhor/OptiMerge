@@ -35,13 +35,18 @@ app = FastAPI(title="BOM Optimization Tool", version="1.0.0")
 # ==============================
 # CORS middleware
 # ==============================
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("uvicorn.error")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # ==============================
 # Auth / JWT configuration
@@ -181,6 +186,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 # ==============================
 @app.post("/auth/signup", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def signup(user_in: UserCreate):
+    print(f"👉 Signup request received: {user_in.email}")
     existing = get_user_by_email(user_in.email)
     if existing:
         raise HTTPException(
