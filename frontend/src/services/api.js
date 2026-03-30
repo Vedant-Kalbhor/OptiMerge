@@ -199,4 +199,18 @@ export const deleteAnalysis = async (analysisId) => {
   }
 };
 
+export const extractDimensions = async (formData) => {
+  return api.post('/extract-dimensions/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30000,
+  });
+};
+
+export const extractDimensionsBbox = async (formData) => {
+  return api.post('/extract-dimensions-bbox/', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 30000,
+  });
+};
+
 export default api;

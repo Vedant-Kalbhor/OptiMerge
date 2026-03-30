@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Button, Card, Row, Col, message, Table, Tag, Spin, Alert } from 'antd';
-import { UploadOutlined, InboxOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { uploadWeldments, uploadBOMs, getWeldmentFiles, getBOMFiles, healthCheck } from '../services/api';
+import { Upload, Button, Card, Row, Col, message, Table, Tag, Spin, Alert, Form, Input, Divider, Modal } from 'antd';
+import { UploadOutlined, InboxOutlined, CheckCircleOutlined, FilePdfOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons';
+import { uploadWeldments, uploadBOMs, getWeldmentFiles, getBOMFiles, healthCheck, extractDimensions } from '../services/api';
+import DrawingExtractorModal from '../components/DrawingExtractorModal';
 
 const { Dragger } = Upload;
 
@@ -11,6 +12,11 @@ const UploadPage = () => {
   const [loading, setLoading] = useState(false);
   const [fileLoading, setFileLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState('checking');
+  const [pdfExtracting, setPdfExtracting] = useState(false);
+  const [extractedDims, setExtractedDims] = useState(null);   // raw API result
+  const [editableDims, setEditableDims] = useState({});        // user-editable fields
+  const [dimModalOpen, setDimModalOpen] = useState(false);
+  const [extractorOpen, setExtractorOpen] = useState(false);
 
   const checkServerHealth = async () => {
     try {
@@ -111,6 +117,66 @@ const UploadPage = () => {
       setFileLoading(false);
     }
   };
+
+  // ── PDF dimension extraction ──────────────────────────────────────────────
+  const handlePdfExtract = async (file) => {
+    try {
+      setPdfExtracting(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await extractDimensions(formData);
+      const result = response.data;
+
+      if (result.status === 'error') {
+        message.error(`Extraction failed: ${result.error}`);
+        return;
+      }
+
+      setExtractedDims(result);
+
+      // Pre-populate editable fields from flat result
+      setEditableDims(result.flat || {});
+      setDimModalOpen(true);
+      message.success(`Extracted ${Object.keys(result.flat || {}).length} dimensions from ${file.name}`);
+    } catch (err) {
+      message.error('Failed to extract dimensions from PDF');
+      console.error(err);
+    } finally {
+      setPdfExtracting(false);
+    }
+  };
+
+  const handleDimFieldChange = (key, value) => {
+    setEditableDims(prev => ({ ...prev, [key]: value }));
+  };
+
+const handleAddDimRow = () => {
+  const newKey = `dim_${Date.now()}`;
+  setEditableDims(prev => ({ ...prev, [newKey]: '' }));
+};
+
+const handleRemoveDimRow = (key) => {
+  setEditableDims(prev => {
+    const copy = { ...prev };
+    delete copy[key];
+    return copy;
+  });
+};
+
+const handleCopyToClipboard = () => {
+  const text = Object.entries(editableDims)
+    .map(([k, v]) => `${k}\t${v}`)
+    .join('\n');
+  navigator.clipboard.writeText(text);
+  message.success('Copied to clipboard as tab-separated values');
+};
+
+const handleExtractConfirm = (flat) => {
+  // flat = { "Total Height": "410", "Outer Dia": "133", ... }
+  // do whatever you want — show it, pre-fill a form, download as CSV, etc.
+  console.log('Extracted dims:', flat);
+  message.success(`${Object.keys(flat).length} dimensions ready`);
+};
 
   useEffect(() => {
     checkServerHealth();
@@ -300,6 +366,18 @@ const UploadPage = () => {
           </Col>
         </Row>
       </Card>
+      
+      
+
+      <Button icon={<FilePdfOutlined />} onClick={() => setExtractorOpen(true)}>
+        Extract from Drawing PDF
+      </Button>
+
+      <DrawingExtractorModal
+        open={extractorOpen}
+        onClose={() => setExtractorOpen(false)}
+        onConfirm={handleExtractConfirm}
+      />
     </div>
   );
 };

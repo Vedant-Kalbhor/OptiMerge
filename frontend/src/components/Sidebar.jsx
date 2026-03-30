@@ -5,7 +5,8 @@ import {
   UploadOutlined,
   BarChartOutlined,
   MenuFoldOutlined,
-  MenuUnfoldOutlined
+  MenuUnfoldOutlined,
+  FilePdfOutlined,   // ← add this
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -14,9 +15,10 @@ const Sidebar = ({ collapsed, toggleCollapse }) => {
   const location = useLocation();
 
   const menuItems = [
-    { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
-    { key: '/upload', icon: <UploadOutlined />, label: 'Upload Files' },
-    { key: '/analysis', icon: <BarChartOutlined />, label: 'Analysis' },
+    { key: '/',           icon: <DashboardOutlined />, label: 'Dashboard' },
+    { key: '/upload',     icon: <UploadOutlined />,    label: 'Upload Files' },
+    { key: '/analysis',   icon: <BarChartOutlined />,  label: 'Analysis' },
+    { key: '/extract-dimensions', icon: <FilePdfOutlined />, label: 'Extract Dimensions' },  // ← add this
   ];
 
   return (

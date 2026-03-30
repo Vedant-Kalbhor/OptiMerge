@@ -14,7 +14,7 @@ from passlib.context import CryptContext
 import logging
 import json
 from typing import List, Dict, Any
-
+from .dimension_extractor import extract_dimensions_from_bytes, extract_with_bboxes
 from .db import analysis_collection, users_collection, ensure_indexes
 
 from bson import ObjectId
@@ -256,128 +256,6 @@ def generate_file_id():
 # -------------------------
 # File upload endpoints
 # -------------------------
-# @app.post("/upload/weldments/")
-# async def upload_weldments(file: UploadFile = File(...)):
-#     """Upload weldment dimensions file"""
-#     try:
-#         print(f"Processing weldment file: {file.filename}")
-
-#         # Validate file type
-#         if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-#             raise HTTPException(status_code=400, detail="Only Excel and CSV files are supported")
-
-#         file_path = f"uploads/{file.filename}"
-#         with open(file_path, "wb") as buffer:
-#             content = await file.read()
-#             buffer.write(content)
-
-#         # Read and parse the file
-#         if file.filename.endswith('.csv'):
-#             df = pd.read_csv(file_path)
-#             df.columns = [c for c in df.columns]
-#         else:
-#             df = parse_weldment_excel(file_path)
-
-#         # Validate and clean the data
-#         validated_data = validate_weldment_data(df)
-
-#         # Store the data
-#         file_id = generate_file_id()
-#         weldment_data[file_id] = {
-#             "filename": file.filename,
-#             "data": validated_data.to_dict('records'),
-#             "file_path": file_path,
-#             "columns": validated_data.columns.tolist(),
-#             "record_count": len(validated_data),
-#             "dataframe": validated_data  # Store the actual DataFrame for analysis
-#         }
-
-#         # ── DELETE file from disk after successful processing ──
-#         try:
-#             os.remove(file_path)
-#         except Exception:
-#             pass  # don't fail the request if cleanup fails
-#         # ──────────────────────────────────────────────────────
-
-#         return {
-#             "message": "File uploaded successfully",
-#             "file_id": file_id,
-#             "record_count": len(validated_data),
-#             "columns": validated_data.columns.tolist()
-#         }
-
-#     except Exception as e:
-#         print(f"Error processing weldment file: {str(e)}")
-#         raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
-
-
-# @app.post("/upload/boms/")
-# async def upload_boms(file: UploadFile = File(...)):
-#     """Upload BOM file"""
-#     try:
-#         print(f"Processing BOM file: {file.filename}")
-
-#         # Validate file type
-#         if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
-#             raise HTTPException(status_code=400, detail="Only Excel and CSV files are supported")
-
-#         file_path = f"uploads/{file.filename}"
-#         with open(file_path, "wb") as buffer:
-#             content = await file.read()
-#             buffer.write(content)
-
-#         # Read the file
-#         if file.filename.endswith('.csv'):
-#             df = pd.read_csv(file_path)
-#         else:
-#             try:
-#                 xl = pd.ExcelFile(file_path)
-#                 sheet_names = xl.sheet_names
-#                 print(f"Available sheets: {sheet_names}")
-
-#                 bom_sheets = [name for name in sheet_names if 'bom' in name.lower() or 'assy' in name.lower()]
-#                 if bom_sheets:
-#                     df = pd.read_excel(file_path, sheet_name=bom_sheets[0])
-#                     print(f"Using sheet: {bom_sheets[0]}")
-#                 else:
-#                     df = pd.read_excel(file_path)
-#             except Exception:
-#                 df = pd.read_excel(file_path)
-
-#         print(f"Original BOM columns: {df.columns.tolist()}")
-#         print(f"BOM Data shape: {df.shape}")
-        
-#         # Validate and clean the data (using bom_utils.validate_bom_data)
-#         validated_data = validate_bom_data(df)
-
-#         # Store the data
-#         file_id = generate_file_id()
-#         bom_data[file_id] = {
-#             "filename": file.filename,
-#             "data": validated_data.to_dict('records'),
-#             "file_path": file_path,
-#             "columns": validated_data.columns.tolist(),
-#             "record_count": len(validated_data),
-#             "dataframe": validated_data  # Store the actual DataFrame for analysis
-#         }
-
-#         # ── DELETE file from disk after successful processing ──
-#         try:
-#             os.remove(file_path)
-#         except Exception:
-#             pass  # don't fail the request if cleanup fails
-#         # ──────────────────────────────────────────────────────
-        
-#         return {
-#             "message": "BOM file uploaded successfully",
-#             "file_id": file_id,
-#             "record_count": len(validated_data),
-#             "columns": validated_data.columns.tolist()
-#         }
-
-#     except Exception as e:
-#         print(f"Error processing BOM file: {str(e)}")
-#         raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
 
 @app.post("/upload/weldments/")
 async def upload_weldments(file: UploadFile = File(...)):
@@ -1245,6 +1123,7 @@ async def analyze_weldment_pairwise(request: dict):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Weldment pairwise analysis failed: {str(e)}")
+
 @app.get("/")
 async def root():
     return {"message": "BOM Optimization Tool API", "status": "running"}
@@ -1259,6 +1138,28 @@ def on_startup():
   # Try to create indexes; failure will be logged but not crash the app
   ensure_indexes()
 
+
+@app.post("/extract-dimensions/")
+async def extract_dimensions(file: UploadFile = File(...)):
+    """Quick text-based extraction"""
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files supported")
+    content = await file.read()
+    result = extract_dimensions_from_bytes(content, file.filename)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/extract-dimensions-bbox/")
+async def extract_dimensions_bbox(file: UploadFile = File(...)):
+    """Visual bounding box extraction — returns page images + block positions"""
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files supported")
+    content = await file.read()
+    result = extract_with_bboxes(content, file.filename)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 if __name__ == "__main__":
     import uvicorn
