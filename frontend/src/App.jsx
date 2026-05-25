@@ -22,6 +22,7 @@ import SignupPage from './pages/SignupPage';
 import BOMSavingsCalculator from './pages/BOMSavingsCalculator';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import DimensionExtractionPage from './pages/DimensionExtractionPage';
+import StandardPartMappingPage from './pages/StandardPartMappingPage';
 
 import './App.css';
 
@@ -114,6 +115,7 @@ function App() {
                     <Route path="/results/bom/replacements" element={<PrivateRoute><BOMReplacementSuggestion /></PrivateRoute>} />
                     <Route path="/calculate-bom-savings/:analysisId" element={<PrivateRoute><BOMSavingsCalculator /></PrivateRoute>} />
                     <Route path="/extract-dimensions" element={<PrivateRoute><DimensionExtractionPage /></PrivateRoute>} />
+                    <Route path="/standard-part-mapping" element={<PrivateRoute><StandardPartMappingPage /></PrivateRoute>} />
                     {/* Fallback route */}
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

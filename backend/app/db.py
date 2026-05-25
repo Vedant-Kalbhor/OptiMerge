@@ -1,6 +1,6 @@
 # db.py
 from sqlalchemy import (
-    create_engine, Column, String, Text, DateTime, Boolean, UniqueConstraint, text
+    create_engine, Column, String, Text, DateTime, Boolean, UniqueConstraint, text, Index
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
@@ -56,6 +56,78 @@ class User(Base):
     created_at       = Column(DateTime,    default=datetime.utcnow)
 
     __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+
+
+class StandardPartLibraryEntry(Base):
+    __tablename__ = "standard_part_library_entries"
+
+    id = Column(String(36), primary_key=True)
+    sheet_name = Column(String(255), nullable=False)
+    part_no = Column(String(64), nullable=False, index=True)
+    family = Column(String(64), nullable=False, index=True)
+    normalized_name = Column(String(255), nullable=False, index=True)
+    thread_m = Column(String(64), nullable=True, index=True)
+    length_mm = Column(String(64), nullable=True, index=True)
+    standard_reference = Column(String(255), nullable=True, index=True)
+    material = Column(String(255), nullable=True)
+    surface_treatment = Column(String(255), nullable=True)
+    raw_payload = Column(Text(16777215), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_standard_part_family_ref", "family", "standard_reference"),
+    )
+
+
+class StandardPartMappingJob(Base):
+    __tablename__ = "standard_part_mapping_jobs"
+
+    id = Column(String(36), primary_key=True)
+    source_file = Column(String(512), nullable=True)
+    standard_file = Column(String(512), nullable=True)
+    status = Column(String(32), nullable=False, default="completed")
+    summary = Column(Text(16777215), nullable=True)
+    raw_result = Column(Text(16777215), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_standard_part_mapping_jobs_created_at", "created_at"),
+    )
+
+
+class StandardPartMappingDecision(Base):
+    __tablename__ = "standard_part_mapping_decisions"
+
+    id = Column(String(36), primary_key=True)
+    job_id = Column(String(36), nullable=False, index=True)
+    source_row_key = Column(String(128), nullable=False, index=True)
+    source_text = Column(Text(16777215), nullable=False)
+    selected_part_no = Column(String(64), nullable=False, index=True)
+    candidate_payload = Column(Text(16777215), nullable=True)
+    reviewer = Column(String(255), nullable=True)
+    confidence = Column(String(32), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_standard_part_mapping_decisions_job_row", "job_id", "source_row_key"),
+    )
+
+
+class VendorAlias(Base):
+    __tablename__ = "vendor_aliases"
+
+    id = Column(String(36), primary_key=True)
+    alias_text = Column(String(512), nullable=False, unique=True, index=True)
+    normalized_term = Column(String(255), nullable=False, index=True)
+    selected_part_no = Column(String(64), nullable=True, index=True)
+    family_hint = Column(String(64), nullable=True, index=True)
+    source_row_key = Column(String(128), nullable=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_vendor_alias_term_part", "normalized_term", "selected_part_no"),
+    )
 
 
 # class BomFile(Base):
@@ -313,9 +385,48 @@ def ensure_indexes():
                     "ON analysis_results (created_at DESC)"
                 ))
                 conn.commit()
-                print("✅ Index idx_analysis_created_at created")
+                print("Index idx_analysis_created_at created")
             else:
-                print("✅ Index idx_analysis_created_at already exists")
-        print("✅ MySQL tables and indexes ensured")
+                print("Index idx_analysis_created_at already exists")
+
+            # Best-effort indexes for standard part mapping tables
+            extra_indexes = [
+                (
+                    "standard_part_mapping_jobs",
+                    "idx_standard_part_mapping_jobs_created_at",
+                    "created_at",
+                ),
+                (
+                    "standard_part_mapping_decisions",
+                    "idx_standard_part_mapping_decisions_job_row",
+                    "job_id, source_row_key",
+                ),
+                (
+                    "vendor_aliases",
+                    "idx_vendor_alias_term_part",
+                    "normalized_term, selected_part_no",
+                ),
+                (
+                    "standard_part_library_entries",
+                    "idx_standard_part_family_ref",
+                    "family, standard_reference",
+                ),
+            ]
+
+            for table_name, index_name, columns in extra_indexes:
+                result = conn.execute(text(
+                    "SELECT COUNT(*) FROM information_schema.statistics "
+                    "WHERE table_schema = DATABASE() "
+                    f"AND table_name = '{table_name}' "
+                    f"AND index_name = '{index_name}'"
+                ))
+                index_exists = result.scalar() > 0
+                if not index_exists:
+                    conn.execute(text(
+                        f"CREATE INDEX {index_name} ON {table_name} ({columns})"
+                    ))
+                    conn.commit()
+                    print(f"Index {index_name} created")
+        print("MySQL tables and indexes ensured")
     except SQLAlchemyError as e:
-        print(f"⚠️  Warning: {e}")
+        print(f"Warning: {e}")

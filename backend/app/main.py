@@ -29,6 +29,7 @@ from .bom_utils import (
     validate_bom_data,
     analyze_bom_data
 )
+from .standard_part_mapping.api import router as standard_part_mapping_router
 
 app = FastAPI(title="BOM Optimization Tool", version="1.0.0")
 
@@ -46,6 +47,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(standard_part_mapping_router)
 
 
 # ==============================
@@ -186,7 +189,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 # ==============================
 @app.post("/auth/signup", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 async def signup(user_in: UserCreate):
-    print(f"👉 Signup request received: {user_in.email}")
+    print(f"Signup request received: {user_in.email}")
     existing = get_user_by_email(user_in.email)
     if existing:
         raise HTTPException(
@@ -299,9 +302,9 @@ async def upload_weldments(file: UploadFile = File(...)):
         # Delete file now that data is safely in memory
         try:
             os.remove(file_path)
-            print(f"🗑️ Deleted uploaded file: {file_path}")
+            print(f"Deleted uploaded file: {file_path}")
         except Exception as e:
-            print(f"⚠️ Could not delete file {file_path}: {e}")
+            print(f"Could not delete file {file_path}: {e}")
 
         return {
             "message": "File uploaded successfully",
@@ -372,9 +375,9 @@ async def upload_boms(file: UploadFile = File(...)):
         # Delete file now that data is safely in memory
         try:
             os.remove(file_path)
-            print(f"🗑️ Deleted uploaded file: {file_path}")
+            print(f"Deleted uploaded file: {file_path}")
         except Exception as e:
-            print(f"⚠️ Could not delete file {file_path}: {e}")
+            print(f"Could not delete file {file_path}: {e}")
 
         return {
             "message": "BOM file uploaded successfully",
@@ -793,9 +796,9 @@ def save_analysis_to_mongodb(analysis_id: str, analysis_type: str, result: dict)
             document,
             upsert=True
         )
-        print(f"✅ Analysis {analysis_id} saved to MongoDB successfully")
+        print(f"Analysis {analysis_id} saved to MongoDB successfully")
     except Exception as e:
-        print(f"❌ Error saving to MongoDB: {str(e)}")
+        print(f"Error saving to MongoDB: {str(e)}")
         # don't raise so API still returns results even if Mongo fails
 
 @app.delete("/analysis/{analysis_id}")

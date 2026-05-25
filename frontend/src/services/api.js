@@ -213,4 +213,36 @@ export const extractDimensionsBbox = async (formData) => {
   });
 };
 
+// Standard Part Mapping endpoints
+export const getStandardPartMappingStatus = async () => {
+  return api.get('/standard-part-mapping/status');
+};
+
+export const getStandardPartMappingDefaults = async () => {
+  return api.get('/standard-part-mapping/default-files');
+};
+
+export const runStandardPartMapping = async (formData) => {
+  return api.post('/standard-part-mapping/run', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+};
+
+export const getStandardPartMappingJob = async (jobId) => {
+  return api.get(`/standard-part-mapping/jobs/${jobId}`);
+};
+
+export const saveStandardPartMappingDecision = async (jobId, formData) => {
+  return api.post(`/standard-part-mapping/jobs/${jobId}/decision`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
+export const exportStandardPartMappingJob = async (jobId) => {
+  return api.get(`/standard-part-mapping/jobs/${jobId}/export`, {
+    responseType: 'blob',
+  });
+};
+
 export default api;
