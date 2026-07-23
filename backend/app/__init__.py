@@ -1,0 +1,2 @@
+"""SmartBOM backend package."""
+

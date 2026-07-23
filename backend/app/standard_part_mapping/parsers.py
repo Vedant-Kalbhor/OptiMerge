@@ -8,10 +8,12 @@ import pandas as pd
 
 
 def _clean_text(value) -> str:
-    if value is None:
+    if value is None or pd.isna(value):
         return ""
     text = str(value).strip()
     if not text:
+        return ""
+    if text.lower() == "nan":
         return ""
     text = text.replace("\r", " ").replace("\n", " ")
     text = re.sub(r"\s+", " ", text)

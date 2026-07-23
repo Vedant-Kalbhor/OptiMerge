@@ -40,8 +40,16 @@ STANDARD_REF_TO_FAMILY = {
 def _clean_text(value) -> str:
     if value is None:
         return ""
+    try:
+        import pandas as pd
+        if pd.isna(value):
+            return ""
+    except Exception:
+        pass
     text = str(value).strip()
     if not text:
+        return ""
+    if text.lower() == "nan":
         return ""
     text = text.replace("\r", " ").replace("\n", " ")
     text = re.sub(r"\s+", " ", text)
