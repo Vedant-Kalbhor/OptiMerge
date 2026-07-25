@@ -106,14 +106,33 @@ def parse_pipe_excel(file_path_or_bytes: Any, file_name: Optional[str] = None) -
 
 def calc_similarity(v1: float, v2: float) -> float:
     """
-    Calculate similarity between two values using formula:
-    min(|V1|, |V2|) / max(|V1|, |V2|) * 100
+    Calculate similarity between two values, exactly matching the VBA
+    Similarity() function used in the source macros:
+
+        mx = MAX(|v1|, |v2|)
+        if mx == 0: similarity = 100
+        else: similarity = 100 - (|v1 - v2| / mx) * 100, clamped at 0
+
+    NOTE: the difference is taken on the SIGNED values (v1 - v2), not on
+    their absolute values. Only the denominator (mx) uses abs(). This
+    matters for X/Y/Z axis data, which can be negative — a naive
+    min(|a|,|b|)/max(|a|,|b|) formula gives the wrong answer whenever the
+    two values have opposite signs.
     """
     a, b = abs(v1), abs(v2)
     max_val = max(a, b)
+
     if max_val == 0.0:
-        return 100.0 if a == b else 0.0
-    return (min(a, b) / max_val) * 100.0
+        return 100.0
+
+    diff = abs(v1 - v2)
+    sim = 100.0 - (diff / max_val * 100.0)
+
+    if sim < 0.0:
+        sim = 0.0
+
+    return sim
+
 
 def pairwise_pipe_comparison(
     df: pd.DataFrame,
@@ -124,6 +143,17 @@ def pairwise_pipe_comparison(
     Perform one-to-one pairwise comparison for pipes.
     mode can be 'xyz_only' or 'xyz_bends'.
     threshold is 0.0 to 100.0 (% match).
+
+    Weighted Match % now matches the two VBA macros exactly:
+      - xyz_bends : Bends 26.667%, X 26.667%, Y 20%, Z 26.667%
+      - xyz_only  : X 36.36%, Y 27.27%, Z 36.36%
+
+    Match % is computed from the RAW (unrounded) similarity values, then
+    rounded once at the end — same as the macro, which rounds only when
+    writing to the sheet, not before combining the weighted components.
+    Individual column values (X %, Y %, Z %, Bends %) are still rounded
+    to 1 decimal for display, matching the macro's Round(...,1) on those
+    cells.
     """
     records = []
     df_indexed = df.reset_index(drop=True)
@@ -143,30 +173,45 @@ def pairwise_pipe_comparison(
             xb, yb, zb = row_b['x_axis'], row_b['y_axis'], row_b['z_axis']
             bb = row_b['bends']
 
-            x_sim = round(calc_similarity(xa, xb), 1)
-            y_sim = round(calc_similarity(ya, yb), 1)
-            z_sim = round(calc_similarity(za, zb), 1)
+            # Raw (unrounded) similarity values — used for the weighted score
+            x_sim_raw = calc_similarity(xa, xb)
+            y_sim_raw = calc_similarity(ya, yb)
+            z_sim_raw = calc_similarity(za, zb)
 
             if mode == 'xyz_bends':
-                bends_sim = round(calc_similarity(ba, bb), 1)
-                match_sim = round((bends_sim + x_sim + y_sim + z_sim) / 4.0, 1)
+                bends_sim_raw = calc_similarity(ba, bb)
+
+                match_sim = round(
+                    (bends_sim_raw * 0.26667)
+                    + (x_sim_raw * 0.26667)
+                    + (y_sim_raw * 0.2)
+                    + (z_sim_raw * 0.26667),
+                    1
+                )
+
                 record = {
                     "Part A": code_a,
                     "Part B": code_b,
-                    "Bends %": bends_sim,
-                    "X %": x_sim,
-                    "Y %": y_sim,
-                    "Z %": z_sim,
+                    "Bends %": round(bends_sim_raw, 1),
+                    "X %": round(x_sim_raw, 1),
+                    "Y %": round(y_sim_raw, 1),
+                    "Z %": round(z_sim_raw, 1),
                     "Match %": match_sim
                 }
             else:
-                match_sim = round((x_sim + y_sim + z_sim) / 3.0, 1)
+                match_sim = round(
+                    (x_sim_raw * 0.3636)
+                    + (y_sim_raw * 0.2727)
+                    + (z_sim_raw * 0.3636),
+                    1
+                )
+
                 record = {
                     "Part A": code_a,
                     "Part B": code_b,
-                    "X %": x_sim,
-                    "Y %": y_sim,
-                    "Z %": z_sim,
+                    "X %": round(x_sim_raw, 1),
+                    "Y %": round(y_sim_raw, 1),
+                    "Z %": round(z_sim_raw, 1),
                     "Match %": match_sim
                 }
 
@@ -194,7 +239,6 @@ def pairwise_pipe_comparison(
             "avg_match_percent": avg_match
         }
     }
-
 def generate_pipe_excel_report(records: List[Dict[str, Any]], mode: str = 'xyz_only') -> bytes:
     """Generate Excel bytes for comparison report"""
     if mode == 'xyz_bends':
