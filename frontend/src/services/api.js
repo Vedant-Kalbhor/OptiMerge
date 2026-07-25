@@ -213,4 +213,55 @@ export const extractDimensionsBbox = async (formData) => {
   });
 };
 
+// Pipe endpoints
+export const uploadPipes = async (formData) => {
+  try {
+    console.log('Uploading Pipes...');
+    const response = await api.post('/upload/pipes/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      timeout: 120000,
+    });
+    return response;
+  } catch (error) {
+    console.error('Upload pipes error:', error);
+    throw error;
+  }
+};
+
+export const getPipeFiles = async () => {
+  try {
+    const response = await api.get('/files/pipes/');
+    return response;
+  } catch (error) {
+    console.error('Get pipe files error:', error);
+    throw error;
+  }
+};
+
+export const analyzePipePairwise = async (data) => {
+  try {
+    console.log('Starting pipe pairwise analysis...');
+    const response = await api.post('/analyze/pipe-pairwise/', data);
+    return response;
+  } catch (error) {
+    console.error('Pipe pairwise analysis error:', error);
+    throw error;
+  }
+};
+
+export const exportPipeReport = async (analysisId, mode = 'xyz_only', format = 'excel') => {
+  try {
+    const response = await api.get(`/export/pipes/${analysisId}`, {
+      params: { mode, format },
+      responseType: 'blob',
+    });
+    return response;
+  } catch (error) {
+    console.error('Export pipe report error:', error);
+    throw error;
+  }
+};
+
 export default api;

@@ -5,8 +5,8 @@ import {
 } from 'antd';
 import { PlayCircleOutlined, RocketOutlined } from '@ant-design/icons';
 import {
-  getWeldmentFiles, getBOMFiles,
-  analyzeDimensionalClustering, analyzeBOMSimilarity, analyzeWeldmentPairwise
+  getWeldmentFiles, getBOMFiles, getPipeFiles,
+  analyzeDimensionalClustering, analyzeBOMSimilarity, analyzeWeldmentPairwise, analyzePipePairwise
 } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 
@@ -16,13 +16,16 @@ const AnalysisPage = () => {
   const [form] = Form.useForm(); // clustering form
   const [bomForm] = Form.useForm(); // bom similarity form
   const [weldmentForm] = Form.useForm(); // weldment pairwise form
+  const [pipeForm] = Form.useForm(); // pipe pairwise form
 
   const [weldmentFiles, setWeldmentFiles] = useState([]);
   const [bomFiles, setBomFiles] = useState([]);
+  const [pipeFiles, setPipeFiles] = useState([]);
 
   const [clusteringLoading, setClusteringLoading] = useState(false);
   const [bomLoading, setBomLoading] = useState(false);
   const [weldmentLoading, setWeldmentLoading] = useState(false);
+  const [pipeLoading, setPipeLoading] = useState(false);
 
   const [analysisResults, setAnalysisResults] = useState(null);
   const navigate = useNavigate();
@@ -33,12 +36,14 @@ const AnalysisPage = () => {
 
   const loadFiles = async () => {
     try {
-      const [weldmentResponse, bomResponse] = await Promise.all([
+      const [weldmentResponse, bomResponse, pipeResponse] = await Promise.all([
         getWeldmentFiles(),
-        getBOMFiles()
+        getBOMFiles(),
+        getPipeFiles()
       ]);
       setWeldmentFiles(weldmentResponse.data || []);
       setBomFiles(bomResponse.data || []);
+      setPipeFiles(pipeResponse.data || []);
     } catch (error) {
       console.error('Failed to load files:', error);
       message.error('Failed to load files');
@@ -144,9 +149,45 @@ const AnalysisPage = () => {
     }
   };
 
+  // ----- NEW: Pipe Pairwise handler -----
+  const onPipeComparison = async (values) => {
+    try {
+      setPipeLoading(true);
+      console.log('Starting pipe pairwise comparison with values:', values);
+
+      const payload = {
+        pipe_file_id: values.pipe_file_id,
+        mode: values.mode || 'xyz_only',
+        threshold: values.threshold ?? 0
+      };
+
+      const response = await analyzePipePairwise(payload);
+      console.log('Pipe pairwise response:', response.data);
+
+      setAnalysisResults(response.data);
+      message.success('Pipe pairwise comparison completed successfully');
+
+      // Navigate to pipe results page
+      navigate(`/results/pipes/${response.data.analysis_id}`, {
+        state: {
+          analysisResults: {
+            pipe_pairwise: response.data.pipe_pairwise_result
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Pipe pairwise error:', error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Pipe comparison failed';
+      message.error(`Pipe comparison failed: ${errorMessage}`);
+    } finally {
+      setPipeLoading(false);
+    }
+  };
+
   // helpers
   const hasWeldmentFiles = weldmentFiles.length > 0;
   const hasBomFiles = bomFiles.length > 0;
+  const hasPipeFiles = pipeFiles.length > 0;
 
   return (
     <div>
@@ -154,11 +195,11 @@ const AnalysisPage = () => {
         <h1>Analysis</h1>
       </div>
 
-      {!hasWeldmentFiles && !hasBomFiles && (
+      {!hasWeldmentFiles && !hasBomFiles && !hasPipeFiles && (
         <Card style={{ marginBottom: 20 }}>
           <div style={{ textAlign: 'center', padding: '20px' }}>
             <h3>No Files Uploaded</h3>
-            <p>Please upload weldment and BOM files first to run analysis.</p>
+            <p>Please upload weldment, BOM, or Pipe files first to run analysis.</p>
             <Button type="primary" onClick={() => navigate('/upload')}>
               Go to Upload
             </Button>
@@ -267,8 +308,6 @@ const AnalysisPage = () => {
                 <Form.Item name="similarity_method" label="Similarity Method">
                   <Select>
                     <Option value="jaccard">Jaccard Similarity</Option>
-                    {/* <Option value="cosine">Cosine Similarity</Option>
-                    <Option value="weighted">Weighted Similarity</Option> */}
                   </Select>
                 </Form.Item>
 
@@ -335,7 +374,6 @@ const AnalysisPage = () => {
                   </Select>
                 </Form.Item>
 
-                {/* <Form.Item name="threshold" label="Match Threshold (0.1 - 1.0)" help="Only pairs with match% >= threshold will be returned (0.1 = 10%)"> */}
                 <Form.Item name="threshold" label="Match Threshold (0.1 - 1.0)">
                   <Slider
                     min={0.1}
@@ -344,17 +382,6 @@ const AnalysisPage = () => {
                     marks={{ 0.1: '0.1', 0.5: '0.5', 1: '1' }}
                   />
                 </Form.Item>
-
-                {/* <Form.Item name="tolerance" label="Numeric Tolerance" help="Used for numeric comparisons (absolute) — smaller = stricter">
-                  <Input placeholder="e.g. 1e-6" />
-                </Form.Item>
-
-                <Form.Item name="include_self" label="Include self comparisons" valuePropName="checked">
-                  <Select>
-                    <Option value={false}>No</Option>
-                    <Option value={true}>Yes</Option>
-                  </Select>
-                </Form.Item> */}
 
                 <Form.Item>
                   <Button
@@ -366,6 +393,81 @@ const AnalysisPage = () => {
                     loading={weldmentLoading}
                   >
                     Run Weldment One-to-One Comparison
+                  </Button>
+                </Form.Item>
+              </Form>
+            )}
+          </Card>
+        </Col>
+
+        {/* NEW: Pipe Pairwise Similarity Analysis Card */}
+        <Col span={12}>
+          <Card title="Pipe Pairwise Similarity Analysis" loading={pipeLoading}>
+            {!hasPipeFiles ? (
+              <div style={{ textAlign: 'center', padding: '20px' }}>
+                <p>No pipe files uploaded.</p>
+                <Button type="primary" onClick={() => navigate('/upload')}>
+                  Upload Pipe Files
+                </Button>
+              </div>
+            ) : (
+              <Form
+                form={pipeForm}
+                layout="vertical"
+                onFinish={onPipeComparison}
+                initialValues={{
+                  mode: "xyz_only",
+                  threshold: 0
+                }}
+              >
+                <Form.Item
+                  name="pipe_file_id"
+                  label="Pipe Dimensions File"
+                  rules={[{ required: true, message: 'Please select a pipe file' }]}
+                >
+                  <Select placeholder="Select pipe file">
+                    {pipeFiles.map(file => (
+                      <Option key={file.file_id} value={file.file_id}>
+                        {file.filename} ({file.record_count} records)
+                      </Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+
+                <Form.Item
+                  name="mode"
+                  label="Comparison Mode"
+                  help="XYZ Only = average of X,Y,Z. XYZ + Bends = average of Bends,X,Y,Z."
+                >
+                  <Select>
+                    <Option value="xyz_only">XYZ Only Comparison</Option>
+                    <Option value="xyz_bends">XYZ + Bends Comparison</Option>
+                  </Select>
+                </Form.Item>
+
+                <Form.Item
+                  name="threshold"
+                  label="Match Threshold (0% - 100%)"
+                  help="Filters output pairs to only show match % >= threshold"
+                >
+                  <Slider
+                    min={0}
+                    max={100}
+                    step={5}
+                    marks={{ 0: '0%', 25: '25%', 50: '50%', 75: '75%', 100: '100%' }}
+                  />
+                </Form.Item>
+
+                <Form.Item>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<PlayCircleOutlined />}
+                    block
+                    size="large"
+                    loading={pipeLoading}
+                  >
+                    Run Pipe Pairwise Analysis
                   </Button>
                 </Form.Item>
               </Form>
