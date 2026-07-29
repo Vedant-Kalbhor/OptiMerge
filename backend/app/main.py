@@ -7,7 +7,7 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -28,6 +28,11 @@ from .clustering_utils import (
 from .bom_utils import (
     validate_bom_data,
     analyze_bom_data
+)
+from .pipe_utils import (
+    parse_pipe_excel,
+    pairwise_pipe_comparison,
+    generate_pipe_excel_report
 )
 
 app = FastAPI(title="BOM Optimization Tool", version="1.0.0")
@@ -246,6 +251,7 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # In-memory storage
 weldment_data = {}
 bom_data = {}
+pipe_data = {}
 analysis_results = {}
 
 
@@ -425,6 +431,81 @@ async def get_weldment_data(file_id: str):
         "data": weldment_data[file_id]["data"],
         "columns": weldment_data[file_id]["columns"]
     }
+
+
+# -------------------------
+# Pipe file upload & management
+# -------------------------
+
+@app.post("/upload/pipes/")
+async def upload_pipes(file: UploadFile = File(...)):
+    """Upload pipe dimensions file"""
+    try:
+        import io
+        print(f"Processing pipe file: {file.filename}")
+
+        if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+            raise HTTPException(status_code=400, detail="Only Excel and CSV files are supported")
+
+        content = await file.read()
+        file_path = f"uploads/{file.filename}"
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+
+        parsed_df = parse_pipe_excel(io.BytesIO(content), file_name=file.filename)
+
+        file_id = generate_file_id()
+        pipe_data[file_id] = {
+            "filename": file.filename,
+            "data": parsed_df.to_dict('records'),
+            "file_path": None,
+            "columns": parsed_df.columns.tolist(),
+            "record_count": len(parsed_df),
+            "dataframe": parsed_df
+        }
+
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            print(f"⚠️ Could not delete file {file_path}: {e}")
+
+        return {
+            "message": "Pipe file uploaded successfully",
+            "file_id": file_id,
+            "record_count": len(parsed_df),
+            "columns": parsed_df.columns.tolist()
+        }
+
+    except Exception as e:
+        print(f"Error processing pipe file: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Error processing file: {str(e)}")
+
+
+@app.get("/files/pipes/")
+async def get_pipe_files():
+    """Get list of uploaded pipe files"""
+    return [
+        {
+            "file_id": fid,
+            "filename": data["filename"],
+            "record_count": data["record_count"],
+            "columns": data["columns"]
+        }
+        for fid, data in pipe_data.items()
+    ]
+
+
+@app.get("/pipe-data/{file_id}")
+async def get_pipe_data(file_id: str):
+    """Get pipe data for visualization"""
+    if file_id not in pipe_data:
+        raise HTTPException(status_code=404, detail="Pipe file not found")
+
+    return {
+        "data": pipe_data[file_id]["data"],
+        "columns": pipe_data[file_id]["columns"]
+    }
+
 
 
 # -------------------------
@@ -1123,6 +1204,115 @@ async def analyze_weldment_pairwise(request: dict):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Weldment pairwise analysis failed: {str(e)}")
+
+
+@app.post("/analyze/pipe-pairwise/")
+async def analyze_pipe_pairwise(request: dict):
+    """
+    Perform one-to-one pairwise similarity comparison on uploaded pipe data.
+    Supports mode: 'xyz_only' or 'xyz_bends'.
+    Supports threshold slider (0.0 to 100.0 %).
+    """
+    try:
+        pipe_file_id = request.get('pipe_file_id')
+        mode = request.get('mode', 'xyz_only')  # 'xyz_only' or 'xyz_bends'
+        threshold = float(request.get('threshold', 0.0))  # 0.0 to 100.0
+
+        if pipe_file_id not in pipe_data:
+            raise HTTPException(status_code=404, detail="Pipe file not found")
+
+        df = pipe_data[pipe_file_id]["dataframe"]
+
+        # Run pairwise pipe comparison utility
+        comparison_res = pairwise_pipe_comparison(
+            df,
+            mode=mode,
+            threshold=threshold
+        )
+
+        analysis_id = generate_file_id()
+        analysis_store = {
+            "type": "pipe_pairwise",
+            "pipe_pairwise": comparison_res,
+            "clustering": {
+                "clusters": [],
+                "metrics": {"n_clusters": 0, "n_samples": len(df), "silhouette_score": 0},
+                "visualization_data": [],
+                "numeric_columns": []
+            },
+            "bom_analysis": {
+                "similar_pairs": [],
+                "replacement_suggestions": []
+            }
+        }
+
+        analysis_results[analysis_id] = analysis_store
+        save_analysis_to_mongodb(analysis_id, f"Pipe Pairwise ({mode})", analysis_store)
+
+        return {
+            "analysis_id": analysis_id,
+            "pipe_pairwise_result": comparison_res,
+            "clustering_result": analysis_store["clustering"],
+            "bom_analysis_result": analysis_store["bom_analysis"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("Pipe pairwise analysis error:", str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Pipe pairwise analysis failed: {str(e)}")
+
+
+@app.get("/export/pipes/{analysis_id}")
+async def export_pipe_analysis(analysis_id: str, mode: Optional[str] = None, format: str = "excel"):
+    """
+    Export pipe analysis results to Excel (.xlsx) or CSV format.
+    File matches 'Comparison_Report_XYZOnly.xlsx' or 'Comparison_Report_XYZ_Bends.xlsx'.
+    """
+    try:
+        # Load analysis data
+        analysis_doc = analysis_collection.find_one({"id": analysis_id})
+        raw = analysis_doc.get("raw") if analysis_doc else analysis_results.get(analysis_id)
+
+        if not raw:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+
+        pipe_res = raw.get("pipe_pairwise") or raw.get("pipe_pairwise_result")
+        if not pipe_res:
+            raise HTTPException(status_code=404, detail="No pipe analysis data in this report")
+
+        table_records = pipe_res.get("pairwise_table", [])
+        actual_mode = mode or pipe_res.get("parameters", {}).get("mode", "xyz_only")
+
+        if format == "csv":
+            df = pd.DataFrame(table_records)
+            csv_str = df.to_csv(index=False)
+            filename = f"Comparison_Report_{'XYZ_Bends' if actual_mode == 'xyz_bends' else 'XYZOnly'}.csv"
+            return Response(
+                content=csv_str,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        # Default Excel format
+        excel_bytes = generate_pipe_excel_report(table_records, mode=actual_mode)
+        filename = f"Comparison_Report_{'XYZ_Bends' if actual_mode == 'xyz_bends' else 'XYZOnly'}.xlsx"
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("Export pipe report error:", str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to export pipe report: {str(e)}")
+
 
 @app.get("/")
 async def root():
