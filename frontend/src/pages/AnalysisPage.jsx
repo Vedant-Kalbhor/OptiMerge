@@ -1,14 +1,14 @@
 // src/pages/AnalysisPage.jsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  Card, Form, Input, Select, Button, Row, Col, message, Slider, Table, Space
+  Card, Form, Input, Select, Button, Row, Col, message, Slider
 } from 'antd';
-import { PlayCircleOutlined, RocketOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined } from '@ant-design/icons';
 import {
   getWeldmentFiles, getBOMFiles, getPipeFiles,
   analyzeDimensionalClustering, analyzeBOMSimilarity, analyzeWeldmentPairwise, analyzePipePairwise
 } from '../services/api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 const { Option } = Select;
 
@@ -27,12 +27,64 @@ const AnalysisPage = () => {
   const [weldmentLoading, setWeldmentLoading] = useState(false);
   const [pipeLoading, setPipeLoading] = useState(false);
 
-  const [analysisResults, setAnalysisResults] = useState(null);
   const navigate = useNavigate();
+  const location = useLocation();
+  const autoRunRef = useRef(false);
+  const smartUpload = location.state?.smartUpload;
 
   useEffect(() => {
     loadFiles();
   }, []);
+
+  useEffect(() => {
+    if (!smartUpload || autoRunRef.current) {
+      return;
+    }
+
+    const runSmartAnalysis = async () => {
+      autoRunRef.current = true;
+
+      try {
+        if (smartUpload.type === 'pipe') {
+          const values = {
+            pipe_file_id: smartUpload.fileId,
+            mode: 'xyz_only',
+            threshold: 0
+          };
+          pipeForm.setFieldsValue(values);
+          await onPipeComparison(values);
+          return;
+        }
+
+        if (smartUpload.type === 'bom') {
+          const values = {
+            bom_file_id: smartUpload.fileId,
+            similarity_method: 'jaccard',
+            threshold: 0.8
+          };
+          bomForm.setFieldsValue(values);
+          await onBOMAnalysis(values);
+          return;
+        }
+
+        if (smartUpload.type === 'weldment') {
+          const values = {
+            weldment_file_id: smartUpload.fileId,
+            threshold: 0.3,
+            tolerance: 1e-6,
+            include_self: false
+          };
+          weldmentForm.setFieldsValue(values);
+          await onWeldmentComparison(values);
+        }
+      } catch (error) {
+        console.error('Smart auto-run failed:', error);
+        message.error('Automatic analysis could not be completed. You can still run it manually.');
+      }
+    };
+
+    runSmartAnalysis();
+  }, [smartUpload]);
 
   const loadFiles = async () => {
     try {
@@ -59,7 +111,6 @@ const AnalysisPage = () => {
       const response = await analyzeDimensionalClustering(values);
       console.log('Dimensional clustering response:', response.data);
 
-      setAnalysisResults(response.data);
       message.success('Dimensional analysis completed successfully');
 
       // Navigate to clustering results page
@@ -89,7 +140,6 @@ const AnalysisPage = () => {
       const response = await analyzeBOMSimilarity(values);
       console.log('BOM analysis response:', response.data);
 
-      setAnalysisResults(response.data);
       message.success('BOM analysis completed successfully');
 
       // Navigate to BOM results page
@@ -127,7 +177,6 @@ const AnalysisPage = () => {
       const response = await analyzeWeldmentPairwise(payload);
       console.log('Weldment pairwise response:', response.data);
 
-      setAnalysisResults(response.data);
       message.success('Weldment pairwise comparison completed successfully');
 
       // Navigate to weldment results page
@@ -164,7 +213,6 @@ const AnalysisPage = () => {
       const response = await analyzePipePairwise(payload);
       console.log('Pipe pairwise response:', response.data);
 
-      setAnalysisResults(response.data);
       message.success('Pipe pairwise comparison completed successfully');
 
       // Navigate to pipe results page
@@ -184,7 +232,6 @@ const AnalysisPage = () => {
     }
   };
 
-  // helpers
   const hasWeldmentFiles = weldmentFiles.length > 0;
   const hasBomFiles = bomFiles.length > 0;
   const hasPipeFiles = pipeFiles.length > 0;

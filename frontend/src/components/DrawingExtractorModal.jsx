@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useMessage } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import PageVisual from "./PageVisual";
 import { Modal, Button, Alert, Divider, message } from 'antd';
 import { extractDimensions, extractDimensionsBbox } from '../services/api';

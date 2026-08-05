@@ -1,22 +1,128 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, Button, Card, Row, Col, message, Table, Tag, Spin, Alert, Form, Input, Divider, Modal } from 'antd';
-import { UploadOutlined, InboxOutlined, CheckCircleOutlined, FilePdfOutlined, RobotOutlined, EditOutlined } from '@ant-design/icons';
-import { uploadWeldments, uploadBOMs, uploadPipes, getWeldmentFiles, getBOMFiles, getPipeFiles, healthCheck, extractDimensions } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { Upload, Button, Card, Row, Col, message, Alert, Divider } from 'antd';
+import { FilePdfOutlined, InboxOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
+import {
+  uploadWeldments,
+  uploadBOMs,
+  uploadPipes,
+  healthCheck
+} from '../services/api';
 import DrawingExtractorModal from '../components/DrawingExtractorModal';
 
 const { Dragger } = Upload;
 
+const normalizeHeader = (value) =>
+  String(value ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+const containsAny = (headers, candidates) =>
+  candidates.some((candidate) =>
+    headers.some((header) => header.includes(normalizeHeader(candidate)))
+  );
+
+const containsAll = (headers, candidates) =>
+  candidates.every((candidate) =>
+    headers.some((header) => header.includes(normalizeHeader(candidate)))
+  );
+
+const readHeadersFromFile = async (file) => {
+  const lowerName = file.name.toLowerCase();
+  let workbook;
+
+  if (lowerName.endsWith('.csv')) {
+    workbook = XLSX.read(await file.text(), { type: 'string' });
+  } else {
+    workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  }
+
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) {
+    return [];
+  }
+
+  const worksheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false });
+  const headerRow = rows.find((row) =>
+    Array.isArray(row) && row.some((cell) => String(cell ?? '').trim() !== '')
+  );
+
+  return (headerRow || [])
+    .map((cell) => normalizeHeader(cell))
+    .filter(Boolean);
+};
+
+const detectUploadTarget = async (file) => {
+  const headers = await readHeadersFromFile(file);
+
+  const isPipe =
+    containsAll(headers, ['x axis', 'y axis', 'z axis', 'effective length']) &&
+    (containsAny(headers, ['if bends', 'bends']) || containsAny(headers, ['if straight', 'straight length']));
+
+  const isBOM =
+    containsAny(headers, ['component']) &&
+    containsAny(headers, ['lev', 'level']) &&
+    containsAny(headers, ['quantity', 'qty']);
+
+  const isWeldment =
+    containsAny(headers, ['assy pn', 'assy']) &&
+    (containsAny(headers, ['total height']) || containsAny(headers, ['outer dia', 'outer diameter']));
+
+  if (isPipe) {
+    return {
+      type: 'pipe',
+      label: 'Pipe Dimensions',
+      uploadFn: uploadPipes,
+      analysisState: {
+        type: 'pipe',
+        fileName: file.name,
+        autoRun: true,
+        autoAnalysis: 'pipe_pairwise'
+      }
+    };
+  }
+
+  if (isBOM) {
+    return {
+      type: 'bom',
+      label: 'BOM',
+      uploadFn: uploadBOMs,
+      analysisState: {
+        type: 'bom',
+        fileName: file.name,
+        autoRun: true,
+        autoAnalysis: 'bom_similarity'
+      }
+    };
+  }
+
+  if (isWeldment) {
+    return {
+      type: 'weldment',
+      label: 'Weldment Dimensions',
+      uploadFn: uploadWeldments,
+      analysisState: {
+        type: 'weldment',
+        fileName: file.name,
+        autoRun: true,
+        autoAnalysis: 'dimensional_clustering'
+      }
+    };
+  }
+
+  throw new Error(
+    'Could not detect the file type from its columns. Please upload a valid weldment, BOM, or pipe template.'
+  );
+};
+
 const UploadPage = () => {
-  const [weldmentFiles, setWeldmentFiles] = useState([]);
-  const [bomFiles, setBomFiles] = useState([]);
-  const [pipeFiles, setPipeFiles] = useState([]);
+  const navigate = useNavigate();
+
   const [loading, setLoading] = useState(false);
-  const [fileLoading, setFileLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState('checking');
-  const [pdfExtracting, setPdfExtracting] = useState(false);
-  const [extractedDims, setExtractedDims] = useState(null);   // raw API result
-  const [editableDims, setEditableDims] = useState({});        // user-editable fields
-  const [dimModalOpen, setDimModalOpen] = useState(false);
   const [extractorOpen, setExtractorOpen] = useState(false);
 
   const checkServerHealth = async () => {
@@ -29,295 +135,65 @@ const UploadPage = () => {
     }
   };
 
-  const weldmentProps = {
-    name: 'file',
-    multiple: false,
-    accept: '.xlsx,.xls,.csv',
-    showUploadList: false,
-    customRequest: async (options) => {
-      const { file, onSuccess, onError } = options;
-      
-      try {
-        setLoading(true);
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        console.log('Uploading weldment file:', file.name);
-        const response = await uploadWeldments(formData);
-        
-        onSuccess(response, file);
-        message.success(`${file.name} uploaded successfully`);
-        
-        // Reload the file list
-        await loadWeldmentFiles();
-      } catch (error) {
-        console.error('Upload error:', error);
-        onError(error);
-        const errorMessage = error.response?.data?.detail || error.message || 'Upload failed';
-        message.error(`${file.name} upload failed: ${errorMessage}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-  };
+  const handleSmartUpload = async (options) => {
+    const { file, onSuccess, onError } = options;
 
-  const bomProps = {
-    name: 'file',
-    multiple: false,
-    accept: '.xlsx,.xls,.csv',
-    showUploadList: false,
-    customRequest: async (options) => {
-      const { file, onSuccess, onError } = options;
-      
-      try {
-        setLoading(true);
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        console.log('Uploading BOM file:', file.name);
-        const response = await uploadBOMs(formData);
-        
-        onSuccess(response, file);
-        message.success(`${file.name} uploaded successfully`);
-        
-        // Reload the file list
-        await loadBOMFiles();
-      } catch (error) {
-        console.error('Upload error:', error);
-        onError(error);
-        const errorMessage = error.response?.data?.detail || error.message || 'Upload failed';
-        message.error(`${file.name} upload failed: ${errorMessage}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-  };
-
-  const pipeProps = {
-    name: 'file',
-    multiple: false,
-    accept: '.xlsx,.xls,.csv',
-    showUploadList: false,
-    customRequest: async (options) => {
-      const { file, onSuccess, onError } = options;
-      
-      try {
-        setLoading(true);
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        console.log('Uploading Pipe file:', file.name);
-        const response = await uploadPipes(formData);
-        
-        onSuccess(response, file);
-        message.success(`${file.name} uploaded successfully`);
-        
-        await loadPipeFiles();
-      } catch (error) {
-        console.error('Pipe upload error:', error);
-        onError(error);
-        const errorMessage = error.response?.data?.detail || error.message || 'Upload failed';
-        message.error(`${file.name} upload failed: ${errorMessage}`);
-      } finally {
-        setLoading(false);
-      }
-    },
-  };
-
-  const loadWeldmentFiles = async () => {
     try {
-      setFileLoading(true);
-      const response = await getWeldmentFiles();
-      setWeldmentFiles(response.data || []);
-    } catch (error) {
-      console.error('Failed to load weldment files:', error);
-      message.error('Failed to load weldment files');
-    } finally {
-      setFileLoading(false);
-    }
-  };
+      setLoading(true);
 
-  const loadBOMFiles = async () => {
-    try {
-      setFileLoading(true);
-      const response = await getBOMFiles();
-      setBomFiles(response.data || []);
-    } catch (error) {
-      console.error('Failed to load BOM files:', error);
-      message.error('Failed to load BOM files');
-    } finally {
-      setFileLoading(false);
-    }
-  };
-
-  const loadPipeFiles = async () => {
-    try {
-      setFileLoading(true);
-      const response = await getPipeFiles();
-      setPipeFiles(response.data || []);
-    } catch (error) {
-      console.error('Failed to load pipe files:', error);
-      message.error('Failed to load pipe files');
-    } finally {
-      setFileLoading(false);
-    }
-  };
-
-  // ── PDF dimension extraction ──────────────────────────────────────────────
-  const handlePdfExtract = async (file) => {
-    try {
-      setPdfExtracting(true);
+      const target = await detectUploadTarget(file);
       const formData = new FormData();
       formData.append('file', file);
-      const response = await extractDimensions(formData);
-      const result = response.data;
 
-      if (result.status === 'error') {
-        message.error(`Extraction failed: ${result.error}`);
-        return;
-      }
+      console.log(`Uploading ${target.type} file:`, file.name);
+      const response = await target.uploadFn(formData);
 
-      setExtractedDims(result);
+      onSuccess(response, file);
+      message.success(`${file.name} uploaded successfully as ${target.label}`);
 
-      // Pre-populate editable fields from flat result
-      setEditableDims(result.flat || {});
-      setDimModalOpen(true);
-      message.success(`Extracted ${Object.keys(result.flat || {}).length} dimensions from ${file.name}`);
-    } catch (err) {
-      message.error('Failed to extract dimensions from PDF');
-      console.error(err);
+      const responseData = response.data || {};
+      navigate('/analysis', {
+        state: {
+          smartUpload: {
+            ...target.analysisState,
+            fileId: responseData.file_id,
+            recordCount: responseData.record_count,
+            columns: responseData.columns || [],
+            filename: file.name
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Smart upload error:', error);
+      onError(error);
+      const errorMessage = error.response?.data?.detail || error.message || 'Upload failed';
+      message.error(`${file.name} upload failed: ${errorMessage}`);
     } finally {
-      setPdfExtracting(false);
+      setLoading(false);
     }
   };
 
-  const handleDimFieldChange = (key, value) => {
-    setEditableDims(prev => ({ ...prev, [key]: value }));
+  const handleExtractConfirm = (flat) => {
+    console.log('Extracted dims:', flat);
+    message.success(`${Object.keys(flat).length} dimensions ready`);
   };
-
-const handleAddDimRow = () => {
-  const newKey = `dim_${Date.now()}`;
-  setEditableDims(prev => ({ ...prev, [newKey]: '' }));
-};
-
-const handleRemoveDimRow = (key) => {
-  setEditableDims(prev => {
-    const copy = { ...prev };
-    delete copy[key];
-    return copy;
-  });
-};
-
-const handleCopyToClipboard = () => {
-  const text = Object.entries(editableDims)
-    .map(([k, v]) => `${k}\t${v}`)
-    .join('\n');
-  navigator.clipboard.writeText(text);
-  message.success('Copied to clipboard as tab-separated values');
-};
-
-const handleExtractConfirm = (flat) => {
-  // flat = { "Total Height": "410", "Outer Dia": "133", ... }
-  // do whatever you want — show it, pre-fill a form, download as CSV, etc.
-  console.log('Extracted dims:', flat);
-  message.success(`${Object.keys(flat).length} dimensions ready`);
-};
 
   useEffect(() => {
     checkServerHealth();
-    loadWeldmentFiles();
-    loadBOMFiles();
   }, []);
 
-  const weldmentColumns = [
-    {
-      title: 'Filename',
-      dataIndex: 'filename',
-      key: 'filename',
-    },
-    {
-      title: 'Records',
-      dataIndex: 'record_count',
-      key: 'record_count',
-    },
-    {
-      title: 'Columns',
-      dataIndex: 'columns',
-      key: 'columns',
-      render: (columns) => (
-        <span title={columns?.join(', ')}>
-          {columns?.length || 0} columns
-        </span>
-      ),
-    },
-    {
-      title: 'Status',
-      key: 'status',
-      render: () => <Tag color="green" icon={<CheckCircleOutlined />}>Ready</Tag>,
-    },
-  ];
-
-  const bomColumns = [
-    {
-      title: 'Filename',
-      dataIndex: 'filename',
-      key: 'filename',
-    },
-    {
-      title: 'Records',
-      dataIndex: 'record_count',
-      key: 'record_count',
-    },
-    {
-      title: 'Columns',
-      dataIndex: 'columns',
-      key: 'columns',
-      render: (columns) => (
-        <span title={columns?.join(', ')}>
-          {columns?.length || 0} columns
-        </span>
-      ),
-    },
-    {
-      title: 'Status',
-      key: 'status',
-      render: () => <Tag color="green" icon={<CheckCircleOutlined />}>Ready</Tag>,
-    },
-  ];
-
-  const pipeColumns = [
-    {
-      title: 'Filename',
-      dataIndex: 'filename',
-      key: 'filename',
-    },
-    {
-      title: 'Records',
-      dataIndex: 'record_count',
-      key: 'record_count',
-    },
-    {
-      title: 'Columns',
-      dataIndex: 'columns',
-      key: 'columns',
-      render: (columns) => (
-        <span title={columns?.join(', ')}>
-          {columns?.length || 0} columns
-        </span>
-      ),
-    },
-    {
-      title: 'Status',
-      key: 'status',
-      render: () => <Tag color="green" icon={<CheckCircleOutlined />}>Ready</Tag>,
-    },
-  ];
+  const smartUploadProps = {
+    name: 'file',
+    multiple: false,
+    accept: '.xlsx,.xls,.csv',
+    showUploadList: false,
+    customRequest: handleSmartUpload,
+  };
 
   return (
     <div>
       <h1>Upload Files</h1>
-      
-      {/* Server Status Alert */}
+
       {serverStatus === 'unhealthy' && (
         <Alert
           message="Backend Server Unavailable"
@@ -332,169 +208,85 @@ const handleExtractConfirm = (flat) => {
           }
         />
       )}
-      
-      <Row gutter={16} style={{ marginBottom: 20 }}>
-        <Col span={8}>
-          <Card 
-            title="Upload Weldment Dimensions" 
-            loading={loading}
-          >
-            <Dragger {...weldmentProps} id="weldment-upload">
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined />
-              </p>
-              <p className="ant-upload-text">
-                Click or drag weldment file
-              </p>
-              <p className="ant-upload-hint">
-                Excel (.xlsx, .xls) & CSV
-              </p>
-            </Dragger>
-            
-            <div style={{ marginTop: 20 }}>
-              <h4>Uploaded Weldment Files</h4>
-              <Spin spinning={fileLoading}>
-                <Table
-                  columns={weldmentColumns}
-                  dataSource={weldmentFiles}
-                  pagination={false}
-                  size="small"
-                  rowKey="file_id"
-                  locale={{ emptyText: 'No weldment files uploaded yet' }}
-                />
-              </Spin>
-            </div>
-          </Card>
-        </Col>
-        
-        <Col span={8}>
-          <Card 
-            title="Upload BOM Files" 
-            loading={loading}
-          >
-            <Dragger {...bomProps} id="bom-upload">
-              <p className="ant-upload-drag-icon">
-                <InboxOutlined />
-              </p>
-              <p className="ant-upload-text">
-                Click or drag BOM file
-              </p>
-              <p className="ant-upload-hint">
-                Excel (.xlsx, .xls) & CSV
-              </p>
-            </Dragger>
-            
-            <div style={{ marginTop: 20 }}>
-              <h4>Uploaded BOM Files</h4>
-              <Spin spinning={fileLoading}>
-                <Table
-                  columns={bomColumns}
-                  dataSource={bomFiles}
-                  pagination={false}
-                  size="small"
-                  rowKey="file_id"
-                  locale={{ emptyText: 'No BOM files uploaded yet' }}
-                />
-              </Spin>
-            </div>
-          </Card>
-        </Col>
 
-        <Col span={8}>
-          <Card 
-            title="Upload Pipe Dimensions" 
+      <Row gutter={16} style={{ marginBottom: 20 }}>
+        <Col span={24}>
+          <Card
+            title="Smart Upload"
             loading={loading}
+            extra={<span>One file in, the right analysis opens automatically</span>}
           >
-            <Dragger {...pipeProps} id="pipe-upload">
+            <Dragger {...smartUploadProps} id="smart-upload">
               <p className="ant-upload-drag-icon">
                 <InboxOutlined />
               </p>
-              <p className="ant-upload-text">
-                Click or drag pipe file
-              </p>
+              <p className="ant-upload-text">Click or drag your file here</p>
               <p className="ant-upload-hint">
-                Excel (.xlsx, .xls) & CSV
+                Supports weldment, BOM, and pipe templates in Excel (.xlsx, .xls) or CSV format
               </p>
             </Dragger>
-            
-            <div style={{ marginTop: 20 }}>
-              <h4>Uploaded Pipe Files</h4>
-              <Spin spinning={fileLoading}>
-                <Table
-                  columns={pipeColumns}
-                  dataSource={pipeFiles}
-                  pagination={false}
-                  size="small"
-                  rowKey="file_id"
-                  locale={{ emptyText: 'No pipe files uploaded yet' }}
-                />
-              </Spin>
-            </div>
           </Card>
         </Col>
       </Row>
-      
+
       <Card title="File Requirements & Tips">
-  <Row gutter={[24, 24]}>
-    {/* Weldment */}
-    <Col xs={24} md={8}>
-      <h4>Weldment Dimension File Format</h4>
-      <ul>
-        <li><strong>Required:</strong> Assy PN (Part Number)</li>
-        <li><strong>Required:</strong> Total Height measurements</li>
-        <li><strong>Required:</strong> Outer Diameter measurements</li>
-        <li>Additional dimensions are automatically detected</li>
-        <li>Excel (.xlsx, .xls) or CSV format</li>
-      </ul>
-      <br></br>
-      <h4>Expected Column Names</h4>
-      <ul>
-        <li>Assy PN, Part Number, or similar</li>
-        <li>Total Height, Height, or similar</li>
-        <li>Outer Dia, Outer Diameter, or similar</li>
-        <li>Inner Dia, Inner Diameter (optional)</li>
-        <li>Flange dimensions (optional)</li>
-        <li>Nozzle dimensions (optional)</li>
-      </ul>
-    </Col>
+        <Row gutter={[24, 24]}>
+          <Col xs={24} md={8}>
+            <h4>Weldment Dimension File Format</h4>
+            <ul>
+              <li><strong>Required:</strong> Assy PN (Part Number)</li>
+              <li><strong>Required:</strong> Total Height measurements</li>
+              <li><strong>Required:</strong> Outer Diameter measurements</li>
+              <li>Additional dimensions are automatically detected</li>
+              <li>Excel (.xlsx, .xls) or CSV format</li>
+            </ul>
+            <br />
+            <h4>Expected Column Names</h4>
+            <ul>
+              <li>Assy PN, Part Number, or similar</li>
+              <li>Total Height, Height, or similar</li>
+              <li>Outer Dia, Outer Diameter, or similar</li>
+              <li>Inner Dia, Inner Diameter (optional)</li>
+              <li>Flange dimensions (optional)</li>
+              <li>Nozzle dimensions (optional)</li>
+            </ul>
+          </Col>
 
-    {/* BOM */}
-    <Col xs={24} md={8}>
-      <h4>BOM File Format</h4>
-      <ul>
-        <li><strong>Required:</strong> Component (Part Numbers)</li>
-        <li><strong>Required:</strong> Lev (Level in BOM hierarchy)</li>
-        <li><strong>Required:</strong> Quantity</li>
-        <li>Assembly ID (optional, for multiple BOMs)</li>
-        <li>Excel (.xlsx, .xls) or CSV format</li>
-      </ul>
-    </Col>
+          <Col xs={24} md={8}>
+            <h4>BOM File Format</h4>
+            <ul>
+              <li><strong>Required:</strong> Component (Part Numbers)</li>
+              <li><strong>Required:</strong> Lev (Level in BOM hierarchy)</li>
+              <li><strong>Required:</strong> Quantity</li>
+              <li>Assembly ID (optional, for multiple BOMs)</li>
+              <li>Excel (.xlsx, .xls) or CSV format</li>
+            </ul>
+          </Col>
 
-    {/* Pipe */}
-    <Col xs={24} md={8}>
-      <h4>Pipe Dimension File Format</h4>
-      <ul>
-        <li><strong>Required:</strong> ITEM CODE</li>
-        <li><strong>Required:</strong> If Bends, No. of Bends</li>
-        <li><strong>Required:</strong> If Straight, Length</li>
-        <li><strong>Required:</strong> Effective Length</li>
-        <li><strong>Required:</strong> X-AXIS, Y-AXIS, Z-AXIS</li>
-        <li>Excel (.xlsx, .xls) or CSV format</li>
-      </ul>
-      <br></br>
-      <h4>Expected Column Names</h4>
-      <ul>
-        <li>ITEM CODE, Part Number, or similar</li>
-        <li>If Bends, No. of Bends</li>
-        <li>If Straight, Length</li>
-        <li>Effective Length</li>
-        <li>X-AXIS, Y-AXIS, Z-AXIS</li>
-      </ul>
-    </Col>
-  </Row>
-</Card>
-      
-      
+          <Col xs={24} md={8}>
+            <h4>Pipe Dimension File Format</h4>
+            <ul>
+              <li><strong>Required:</strong> ITEM CODE</li>
+              <li><strong>Required:</strong> If Bends, No. of Bends</li>
+              <li><strong>Required:</strong> If Straight, Length</li>
+              <li><strong>Required:</strong> Effective Length</li>
+              <li><strong>Required:</strong> X-AXIS, Y-AXIS, Z-AXIS</li>
+              <li>Excel (.xlsx, .xls) or CSV format</li>
+            </ul>
+            <br />
+            <h4>Expected Column Names</h4>
+            <ul>
+              <li>ITEM CODE, Part Number, or similar</li>
+              <li>If Bends, No. of Bends</li>
+              <li>If Straight, Length</li>
+              <li>Effective Length</li>
+              <li>X-AXIS, Y-AXIS, Z-AXIS</li>
+            </ul>
+          </Col>
+        </Row>
+      </Card>
+
+      <Divider />
 
       <Button icon={<FilePdfOutlined />} onClick={() => setExtractorOpen(true)}>
         Extract from Drawing PDF
