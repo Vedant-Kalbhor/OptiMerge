@@ -16,6 +16,7 @@ import BOMResultsPage from './pages/BOMResultsPage';
 import PreviousAnalysisPage from './pages/PreviousAnalysisPage';
 import WeldmentResultsPage from './pages/WeldmentResultsPage';
 import PipesResultsPage from './pages/PipesResultsPage';
+import PipeReplacementSuggestion from './pages/PipeReplacementSuggestion';
 import BOMComparePage from './pages/BOMComparePage';
 import BOMReplacementSuggestion from './pages/BOMReplacementSuggestion';
 import LoginPage from './pages/LoginPage';
@@ -111,6 +112,7 @@ function App() {
                     <Route path="/results/bom/:analysisId" element={<PrivateRoute><BOMResultsPage /></PrivateRoute>} />
                     <Route path="/previous/:analysisId" element={<PrivateRoute><PreviousAnalysisPage /></PrivateRoute>} />
                     <Route path="/results/weldment/:analysisId" element={<PrivateRoute><WeldmentResultsPage /></PrivateRoute>} />
+                    <Route path="/results/pipes/replacements/:analysisId" element={<PrivateRoute><PipeReplacementSuggestion /></PrivateRoute>} />
                     <Route path="/results/pipes/:analysisId" element={<PrivateRoute><PipesResultsPage /></PrivateRoute>} />
                     <Route path="/results/bom/compare/:bomA/:bomB" element={<PrivateRoute><BOMComparePage /></PrivateRoute>} />
                     <Route path="/results/bom/replacements" element={<PrivateRoute><BOMReplacementSuggestion /></PrivateRoute>} />

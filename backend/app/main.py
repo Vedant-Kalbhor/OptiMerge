@@ -32,7 +32,8 @@ from .bom_utils import (
 from .pipe_utils import (
     parse_pipe_excel,
     pairwise_pipe_comparison,
-    generate_pipe_excel_report
+    generate_pipe_excel_report,
+    generate_pipe_replacement_suggestions
 )
 
 app = FastAPI(title="BOM Optimization Tool", version="1.0.0")
@@ -1212,31 +1213,49 @@ async def analyze_pipe_pairwise(request: dict):
     Perform one-to-one pairwise similarity comparison on uploaded pipe data.
     Supports mode: 'xyz_only' or 'xyz_bends'.
     Supports threshold slider (0.0 to 100.0 %).
+    Also generates optional cost-effective replacement suggestions when
+    the uploaded Pipe file contains a Price column.
     """
     try:
         pipe_file_id = request.get('pipe_file_id')
-        mode = request.get('mode', 'xyz_only')  # 'xyz_only' or 'xyz_bends'
-        threshold = float(request.get('threshold', 0.0))  # 0.0 to 100.0
+        mode = request.get('mode', 'xyz_only')
+        threshold = float(request.get('threshold', 0.0))
 
         if pipe_file_id not in pipe_data:
             raise HTTPException(status_code=404, detail="Pipe file not found")
 
         df = pipe_data[pipe_file_id]["dataframe"]
 
-        # Run pairwise pipe comparison utility
+        # Existing Pipe similarity calculation - DO NOT CHANGE
         comparison_res = pairwise_pipe_comparison(
             df,
             mode=mode,
             threshold=threshold
         )
 
+        # New optional price-based replacement analysis.
+        # This does not affect the existing similarity calculation.
+        replacement_res = generate_pipe_replacement_suggestions(
+            comparison_res.get("pairwise_table", []),
+            df
+        )
+
+        # Attach replacement information to the existing Pipe result.
+        comparison_res["price_available"] = replacement_res.get("price_available", False)
+        comparison_res["replacement_suggestions"] = replacement_res
+
         analysis_id = generate_file_id()
+
         analysis_store = {
             "type": "pipe_pairwise",
             "pipe_pairwise": comparison_res,
             "clustering": {
                 "clusters": [],
-                "metrics": {"n_clusters": 0, "n_samples": len(df), "silhouette_score": 0},
+                "metrics": {
+                    "n_clusters": 0,
+                    "n_samples": len(df),
+                    "silhouette_score": 0
+                },
                 "visualization_data": [],
                 "numeric_columns": []
             },
@@ -1247,7 +1266,12 @@ async def analyze_pipe_pairwise(request: dict):
         }
 
         analysis_results[analysis_id] = analysis_store
-        save_analysis_to_mongodb(analysis_id, f"Pipe Pairwise ({mode})", analysis_store)
+
+        save_analysis_to_mongodb(
+            analysis_id,
+            f"Pipe Pairwise ({mode})",
+            analysis_store
+        )
 
         return {
             "analysis_id": analysis_id,
@@ -1262,8 +1286,10 @@ async def analyze_pipe_pairwise(request: dict):
         print("Pipe pairwise analysis error:", str(e))
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Pipe pairwise analysis failed: {str(e)}")
-
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipe pairwise analysis failed: {str(e)}"
+        )
 
 @app.get("/export/pipes/{analysis_id}")
 async def export_pipe_analysis(analysis_id: str, mode: Optional[str] = None, format: str = "excel"):

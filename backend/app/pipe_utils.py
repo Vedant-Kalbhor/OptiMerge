@@ -25,7 +25,7 @@ def parse_pipe_val(val: Any) -> float:
         return 0.0
 
 def parse_pipe_excel(file_path_or_bytes: Any, file_name: Optional[str] = None) -> pd.DataFrame:
-    """Parse pipe Excel or CSV file into standardized DataFrame"""
+    """Parse pipe Excel or CSV file into standardized DataFrame. Price is optional."""
     try:
         is_csv = False
         if isinstance(file_path_or_bytes, str):
@@ -42,11 +42,13 @@ def parse_pipe_excel(file_path_or_bytes: Any, file_name: Optional[str] = None) -
                 file_path_or_bytes.seek(0)
             df = pd.read_excel(file_path_or_bytes)
 
-        # Detect columns
         col_map = {}
         for orig_col in df.columns:
             clean = clean_column_name(orig_col)
-            if 'item' in clean or 'code' in clean or 'pn' in clean or 'part' in clean:
+            if 'price' in clean or 'unit_price' in clean or 'cost' in clean:
+                if 'price' not in col_map:
+                    col_map['price'] = orig_col
+            elif 'item' in clean or 'code' in clean or 'pn' in clean or 'part' in clean:
                 if 'item_code' not in col_map:
                     col_map['item_code'] = orig_col
             elif 'bend' in clean:
@@ -68,10 +70,9 @@ def parse_pipe_excel(file_path_or_bytes: Any, file_name: Optional[str] = None) -
                 if 'z_axis' not in col_map:
                     col_map['z_axis'] = orig_col
 
-        # Fallback to column index if needed
         cols = list(df.columns)
         if 'item_code' not in col_map and len(cols) > 1:
-            col_map['item_code'] = cols[1]  # usually 2nd column is ITEM CODE
+            col_map['item_code'] = cols[1]
         if 'bends' not in col_map and len(cols) > 2:
             col_map['bends'] = cols[2]
         if 'straight_length' not in col_map and len(cols) > 3:
@@ -85,21 +86,23 @@ def parse_pipe_excel(file_path_or_bytes: Any, file_name: Optional[str] = None) -
         if 'z_axis' not in col_map and len(cols) > 7:
             col_map['z_axis'] = cols[7]
 
-        # Extract normalized data
         norm_df = pd.DataFrame()
         norm_df['item_code'] = df[col_map['item_code']].apply(
             lambda v: '' if pd.isna(v) else str(v).strip()
         )
-        norm_df = norm_df[~norm_df['item_code'].isin(['', 'nan', 'none', 'null'])]
+        norm_df = norm_df[~norm_df['item_code'].isin(['', 'nan', 'none', 'null'])].copy()
 
-        norm_df['bends'] = df[col_map['bends']].apply(parse_pipe_val)
-        norm_df['straight_length'] = df[col_map['straight_length']].apply(parse_pipe_val)
-        norm_df['effective_length'] = df[col_map['effective_length']].apply(parse_pipe_val)
-        norm_df['x_axis'] = df[col_map['x_axis']].apply(parse_pipe_val)
-        norm_df['y_axis'] = df[col_map['y_axis']].apply(parse_pipe_val)
-        norm_df['z_axis'] = df[col_map['z_axis']].apply(parse_pipe_val)
+        norm_df['bends'] = df.loc[norm_df.index, col_map['bends']].apply(parse_pipe_val)
+        norm_df['straight_length'] = df.loc[norm_df.index, col_map['straight_length']].apply(parse_pipe_val)
+        norm_df['effective_length'] = df.loc[norm_df.index, col_map['effective_length']].apply(parse_pipe_val)
+        norm_df['x_axis'] = df.loc[norm_df.index, col_map['x_axis']].apply(parse_pipe_val)
+        norm_df['y_axis'] = df.loc[norm_df.index, col_map['y_axis']].apply(parse_pipe_val)
+        norm_df['z_axis'] = df.loc[norm_df.index, col_map['z_axis']].apply(parse_pipe_val)
 
-        return norm_df
+        if 'price' in col_map:
+            norm_df['price'] = df.loc[norm_df.index, col_map['price']].apply(parse_pipe_val)
+
+        return norm_df.reset_index(drop=True)
     except Exception as e:
         print(f"Error parsing pipe Excel file: {str(e)}")
         raise
@@ -255,3 +258,144 @@ def generate_pipe_excel_report(records: List[Dict[str, Any]], mode: str = 'xyz_o
         df.to_excel(writer, sheet_name=sheet_name, index=False)
 
     return output.getvalue()
+
+
+def find_exact_pipe_groups(pairwise_table: List[Dict[str, Any]]) -> List[List[str]]:
+    """Find connected groups of pipes whose existing pairwise Match % is exactly 100."""
+    adjacency = {}
+    for record in pairwise_table:
+        match_pct = parse_pipe_val(record.get('Match %', 0))
+        if match_pct != 100.0:
+            continue
+        part_a = str(record.get('Part A', '')).strip()
+        part_b = str(record.get('Part B', '')).strip()
+        if not part_a or not part_b:
+            continue
+        adjacency.setdefault(part_a, set()).add(part_b)
+        adjacency.setdefault(part_b, set()).add(part_a)
+
+    visited = set()
+    groups = []
+    for start in sorted(adjacency):
+        if start in visited:
+            continue
+        stack = [start]
+        group = []
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            group.append(current)
+            for neighbour in adjacency.get(current, set()):
+                if neighbour not in visited:
+                    stack.append(neighbour)
+        if len(group) > 1:
+            groups.append(sorted(group))
+    groups.sort(key=lambda group: group[0])
+    return groups
+
+
+def generate_pipe_replacement_suggestions(pairwise_table: List[Dict[str, Any]], df: pd.DataFrame) -> Dict[str, Any]:
+    """Generate cost-effective replacements from existing 100% pipe matches."""
+    if 'price' not in df.columns:
+        return {
+            "price_available": False,
+            "groups": [],
+            "replacement_rows": [],
+            "summary": {
+                "total_pipes": int(df['item_code'].nunique()),
+                "replacement_opportunities": 0,
+                "total_savings": 0.0,
+                "average_savings": 0.0,
+                "average_savings_percent": 0.0
+            }
+        }
+
+    price_map = {}
+    for _, row in df.iterrows():
+        item_code = str(row.get('item_code', '')).strip()
+        if not item_code:
+            continue
+        price_map[item_code] = float(parse_pipe_val(row.get('price', 0)))
+
+    groups = find_exact_pipe_groups(pairwise_table)
+    formatted_groups = []
+    replacement_rows = []
+
+    total_original = 0.0
+    total_savings = 0.0
+
+    for index, members in enumerate(groups, start=1):
+        members_with_prices = [
+            {
+                "item_code": item,
+                "price": round(float(price_map.get(item, 0.0)), 4)
+            }
+            for item in members
+        ]
+
+        if not members_with_prices:
+            continue
+
+        cheapest = min(members_with_prices, key=lambda item: item["price"])
+
+        group_rows = []
+
+        for member in members_with_prices:
+            if member["item_code"] == cheapest["item_code"]:
+                continue
+
+            cost_from = member["price"]
+            cost_to = cheapest["price"]
+            saving = round(cost_from - cost_to, 4)
+
+            if saving <= 0:
+                continue
+
+            saving_pct = round((saving / cost_from) * 100, 4) if cost_from > 0 else 0.0
+
+            row = {
+                "group_id": f"G{index:03d}",
+                "from_item": member["item_code"],
+                "to_item": cheapest["item_code"],
+                "cost_from": round(cost_from, 4),
+                "cost_to": round(cost_to, 4),
+                "saving_abs": saving,
+                "saving_pct": saving_pct
+            }
+
+            group_rows.append(row)
+            replacement_rows.append(row)
+            total_original += cost_from
+            total_savings += saving
+
+        formatted_groups.append({
+            "group_id": f"G{index:03d}",
+            "members": members_with_prices,
+            "cheapest_item": cheapest["item_code"],
+            "cheapest_price": cheapest["price"],
+            "replacements": group_rows,
+            "total_savings": round(sum(r["saving_abs"] for r in group_rows), 4)
+        })
+
+    average_savings = round(total_savings / len(replacement_rows), 4) if replacement_rows else 0.0
+    average_savings_percent = round(
+        sum(r["saving_pct"] for r in replacement_rows) / len(replacement_rows),
+        4
+    ) if replacement_rows else 0.0
+
+    return {
+        "price_available": True,
+        "groups": formatted_groups,
+        "replacement_rows": replacement_rows,
+        "summary": {
+            "total_pipes": int(df['item_code'].nunique()),
+            "replacement_opportunities": len(replacement_rows),
+            "groups": len(formatted_groups),
+            "total_original_cost": round(total_original, 4),
+            "total_savings": round(total_savings, 4),
+            "average_savings": average_savings,
+            "average_savings_percent": average_savings_percent
+        }
+    }
