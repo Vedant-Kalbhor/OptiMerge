@@ -119,7 +119,8 @@ const AnalysisPage = () => {
           analysisResults: {
             clustering: response.data.clustering_result,
             bom_analysis: response.data.bom_analysis_result
-          }
+          },
+          source_file: response.data.source_file
         }
       });
     } catch (error) {
@@ -148,7 +149,8 @@ const AnalysisPage = () => {
           analysisResults: {
             clustering: response.data.clustering_result,
             bom_analysis: response.data.bom_analysis_result
-          }
+          },
+          source_file: response.data.source_file
         }
       });
     } catch (error) {
@@ -186,7 +188,8 @@ const AnalysisPage = () => {
             weldment_pairwise: response.data.weldment_pairwise_result,
             clustering: response.data.clustering_result,
             bom_analysis: response.data.bom_analysis_result
-          }
+          },
+          source_file: response.data.source_file
         }
       });
     } catch (error) {
@@ -220,7 +223,8 @@ const AnalysisPage = () => {
         state: {
           analysisResults: {
             pipe_pairwise: response.data.pipe_pairwise_result
-          }
+          },
+          source_file: response.data.source_file
         }
       });
     } catch (error) {

@@ -28,6 +28,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { calculateBOMSavings, getAnalysisResults } from '../services/api';
 import { saveAs } from 'file-saver';
 import * as XLSX from 'xlsx';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 
 const { Title, Text } = Typography;
 const { Dragger } = AntdUpload;
@@ -39,6 +40,7 @@ const BOMSavingsCalculator = () => {
   const [calculating, setCalculating] = useState(false);
   const [savingsData, setSavingsData] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [replacements, setReplacements] = useState([]);
   const { analysisId } = useParams();
   const navigate = useNavigate();
@@ -62,6 +64,7 @@ const BOMSavingsCalculator = () => {
         const data = response.data;
         const raw = data.raw || data;
         const weldmentData = raw?.weldment_pairwise || raw?.weldment_pairwise_result;
+        setSourceFile(data.source_file || raw?.source_file || null);
         
         if (!weldmentData) {
           message.error('No weldment analysis data found');
@@ -542,6 +545,18 @@ const BOMSavingsCalculator = () => {
       <Title level={2}>
         <CalculatorOutlined /> BOM Savings Calculator
       </Title>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
       
       <Alert
         message="Instructions"

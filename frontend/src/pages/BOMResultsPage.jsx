@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Card, Table, Tag, Progress, Alert, Button, Spin, message } from 'antd';
 import { DownloadOutlined, BarChartOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
@@ -21,6 +22,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 const BOMResultsPage = () => {
   const [bomResults, setBomResults] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const { analysisId } = useParams();
   const navigate = useNavigate();
@@ -29,6 +31,7 @@ const BOMResultsPage = () => {
   useEffect(() => {
     if (location.state?.analysisResults?.bom_analysis) {
       setBomResults(location.state.analysisResults.bom_analysis);
+      setSourceFile(location.state.source_file || location.state.analysisResults?.source_file || null);
       setLoading(false);
     } else if (analysisId) {
       loadAnalysisResults();
@@ -45,6 +48,7 @@ const BOMResultsPage = () => {
       const data = response.data;
       const bom = data.bom_analysis_result || data.bom_analysis || data;
       setBomResults(bom);
+      setSourceFile(data.source_file || data.raw?.source_file || null);
     } catch (error) {
       console.error('Error loading BOM results:', error);
       message.error('Failed to load BOM results');
@@ -201,7 +205,7 @@ const BOMResultsPage = () => {
           onClick={() =>
             navigate(
               `/results/bom/compare/${encodeURIComponent(record.bom_a)}/${encodeURIComponent(record.bom_b)}`,
-              { state: { pair: record } }
+              { state: { pair: record, source_file: sourceFile } }
             )
           }
         >
@@ -322,6 +326,18 @@ const chartOptions = {
     <div>
       <h1>BOM Similarity Results</h1>
 
+      {sourceFile && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
+
       <Card style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
@@ -352,7 +368,8 @@ const chartOptions = {
                 analysisResults: {
                   bom_analysis: bomResults
                 },
-                analysisId: analysisId
+                analysisId: analysisId,
+                source_file: sourceFile
               }
             })
           }

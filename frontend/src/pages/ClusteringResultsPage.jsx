@@ -3,11 +3,13 @@ import { Card, Table, Tag, Progress, Row, Col, Alert, Button, Spin, Modal, messa
 import { DownloadOutlined, EyeOutlined, ClusterOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import ClusterChart from '../components/ClusterChart';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 const ClusteringResultsPage = () => {
   const [clusteringResults, setClusteringResults] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [clusterModalVisible, setClusterModalVisible] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
@@ -18,6 +20,7 @@ const ClusteringResultsPage = () => {
   useEffect(() => {
     if (location.state?.analysisResults?.clustering) {
       setClusteringResults(location.state.analysisResults.clustering);
+      setSourceFile(location.state.source_file || location.state.analysisResults?.source_file || null);
       setLoading(false);
     } else if (analysisId) {
       loadAnalysisResults();
@@ -35,6 +38,7 @@ const ClusteringResultsPage = () => {
       const data = response.data;
       const clustering = data.clustering_result || data.clustering || data;
       setClusteringResults(clustering);
+      setSourceFile(data.source_file || data.raw?.source_file || null);
     } catch (error) {
       console.error('Error loading clustering results:', error);
       message.error('Failed to load clustering results');
@@ -196,6 +200,18 @@ const ClusteringResultsPage = () => {
   return (
     <div>
       <h1>Clustering Results</h1>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
 
       <Row gutter={16} style={{ marginBottom: 20 }}>
         <Col span={12}>

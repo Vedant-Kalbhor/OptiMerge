@@ -23,6 +23,7 @@ import {
   CalculatorOutlined
 } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 import ClusterChart from '../components/ClusterChart';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -601,6 +602,7 @@ const PreviousAnalysisPage = () => {
       : raw?.weldment_pairwise ? 'weldment_pairwise'
         : raw?.bom_analysis ? 'bom_analysis'
           : 'unknown');
+  const sourceFile = raw?.source_file || doc?.source_file || null;
 
   const stats = calculateStatistics(raw);
   const vizConfig = prepareVisualizationConfig(raw);
@@ -611,6 +613,18 @@ const PreviousAnalysisPage = () => {
     return (
       <div style={{ padding: 20 }}>
         <h2>Previous Analysis Result</h2>
+
+        {sourceFile && (
+          <Card style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>Source File</div>
+                <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+              </div>
+              <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+            </div>
+          </Card>
+        )}
 
         <Row gutter={16} style={{ marginBottom: 18 }}>
           <Col span={8}><Card><div style={{ fontSize: 18 }}>Similar BOM Pairs: {bom?.similar_pairs?.length || 0}</div></Card></Col>
@@ -1000,6 +1014,18 @@ const PreviousAnalysisPage = () => {
       <div style={{ padding: 20 }}>
         <h2>Previous Analysis Result (Weldment Pairwise)</h2>
 
+        {sourceFile && (
+          <Card style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>Source File</div>
+                <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+              </div>
+              <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+            </div>
+          </Card>
+        )}
+
         <Row gutter={16} style={{ marginBottom: 18 }}>
           <Col span={8}>
             <Card>
@@ -1080,6 +1106,18 @@ const PreviousAnalysisPage = () => {
   return (
     <div style={{ padding: 20 }}>
       <h2>Previous Analysis Result</h2>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
 
       <Row gutter={16} style={{ marginBottom: 18 }}>
         <Col span={8}>

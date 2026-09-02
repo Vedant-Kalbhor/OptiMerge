@@ -7,12 +7,14 @@ import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, FileResponse
 from pydantic import BaseModel, EmailStr
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 import logging
 import json
+import re
+from pathlib import Path
 from typing import List, Dict, Any
 from .dimension_extractor import extract_dimensions_from_bytes, extract_with_bboxes
 from .db import analysis_collection, users_collection, ensure_indexes
@@ -260,6 +262,52 @@ def generate_file_id():
     return str(uuid.uuid4())
 
 
+def _sanitize_upload_filename(filename: str) -> str:
+    base = os.path.basename(filename or "uploaded-file")
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._-")
+    return safe or "uploaded-file"
+
+
+def _build_source_file_metadata(file_kind: str, file_id: str, filename: str) -> dict:
+    return {
+        "file_id": file_id,
+        "filename": filename,
+        "file_kind": file_kind,
+        "download_url": f"/uploaded-files/{file_kind}/{file_id}",
+    }
+
+
+def _get_uploaded_record(file_kind: str, file_id: str):
+    store_map = {
+        "weldment": weldment_data,
+        "bom": bom_data,
+        "pipe": pipe_data,
+    }
+    store = store_map.get(file_kind)
+    if not store or file_id not in store:
+        return None
+    return store[file_id]
+
+
+def _resolve_uploaded_file_path(file_kind: str, file_id: str):
+    record = _get_uploaded_record(file_kind, file_id)
+    if record and record.get("file_path") and os.path.exists(record["file_path"]):
+        return record
+
+    uploads_dir = Path("uploads")
+    if uploads_dir.exists():
+        matches = sorted(uploads_dir.glob(f"{file_id}_*"))
+        if matches:
+            file_path = str(matches[0])
+            if record is not None:
+                record["file_path"] = file_path
+            return record or {
+                "file_path": file_path,
+                "filename": matches[0].name.split("_", 1)[-1],
+            }
+    return None
+
+
 # -------------------------
 # File upload endpoints
 # -------------------------
@@ -278,8 +326,9 @@ async def upload_weldments(file: UploadFile = File(...)):
         # Read content into memory first
         content = await file.read()
 
-        # Write to disk temporarily (needed for parse_weldment_excel)
-        file_path = f"uploads/{file.filename}"
+        file_id = generate_file_id()
+        safe_filename = _sanitize_upload_filename(file.filename)
+        file_path = os.path.join("uploads", f"{file_id}_{safe_filename}")
         with open(file_path, "wb") as buffer:
             buffer.write(content)
 
@@ -293,26 +342,19 @@ async def upload_weldments(file: UploadFile = File(...)):
         validated_data = validate_weldment_data(df)
 
         # Store the data
-        file_id = generate_file_id()
         weldment_data[file_id] = {
             "filename": file.filename,
             "data": validated_data.to_dict('records'),
-            "file_path": None,
+            "file_path": file_path,
             "columns": validated_data.columns.tolist(),
             "record_count": len(validated_data),
             "dataframe": validated_data
         }
 
-        # Delete file now that data is safely in memory
-        try:
-            os.remove(file_path)
-            print(f"🗑️ Deleted uploaded file: {file_path}")
-        except Exception as e:
-            print(f"⚠️ Could not delete file {file_path}: {e}")
-
         return {
             "message": "File uploaded successfully",
             "file_id": file_id,
+            "filename": file.filename,
             "record_count": len(validated_data),
             "columns": validated_data.columns.tolist()
         }
@@ -336,8 +378,9 @@ async def upload_boms(file: UploadFile = File(...)):
         # Read content into memory first
         content = await file.read()
 
-        # Write to disk temporarily
-        file_path = f"uploads/{file.filename}"
+        file_id = generate_file_id()
+        safe_filename = _sanitize_upload_filename(file.filename)
+        file_path = os.path.join("uploads", f"{file_id}_{safe_filename}")
         with open(file_path, "wb") as buffer:
             buffer.write(content)
 
@@ -366,26 +409,19 @@ async def upload_boms(file: UploadFile = File(...)):
         validated_data = validate_bom_data(df)
 
         # Store the data
-        file_id = generate_file_id()
         bom_data[file_id] = {
             "filename": file.filename,
             "data": validated_data.to_dict('records'),
-            "file_path": None,
+            "file_path": file_path,
             "columns": validated_data.columns.tolist(),
             "record_count": len(validated_data),
             "dataframe": validated_data
         }
 
-        # Delete file now that data is safely in memory
-        try:
-            os.remove(file_path)
-            print(f"🗑️ Deleted uploaded file: {file_path}")
-        except Exception as e:
-            print(f"⚠️ Could not delete file {file_path}: {e}")
-
         return {
             "message": "BOM file uploaded successfully",
             "file_id": file_id,
+            "filename": file.filename,
             "record_count": len(validated_data),
             "columns": validated_data.columns.tolist()
         }
@@ -402,7 +438,8 @@ async def get_weldment_files():
             "file_id": fid,
             "filename": data["filename"],
             "record_count": data["record_count"],
-            "columns": data["columns"]
+            "columns": data["columns"],
+            "download_url": f"/uploaded-files/weldment/{fid}"
         }
         for fid, data in weldment_data.items()
     ]
@@ -416,7 +453,8 @@ async def get_bom_files():
             "file_id": fid,
             "filename": data["filename"],
             "record_count": data["record_count"],
-            "columns": data["columns"]
+            "columns": data["columns"],
+            "download_url": f"/uploaded-files/bom/{fid}"
         }
         for fid, data in bom_data.items()
     ]
@@ -434,6 +472,27 @@ async def get_weldment_data(file_id: str):
     }
 
 
+@app.get("/uploaded-files/{file_kind}/{file_id}")
+async def get_uploaded_file(file_kind: str, file_id: str):
+    """Return the exact uploaded file for preview or download."""
+    if file_kind not in {"weldment", "bom", "pipe"}:
+        raise HTTPException(status_code=400, detail="Unsupported file type")
+
+    record = _resolve_uploaded_file_path(file_kind, file_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Uploaded file not found")
+
+    file_path = record.get("file_path")
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="Uploaded file not found on disk")
+
+    return FileResponse(
+        path=file_path,
+        filename=record.get("filename") or os.path.basename(file_path),
+        media_type="application/octet-stream"
+    )
+
+
 # -------------------------
 # Pipe file upload & management
 # -------------------------
@@ -449,30 +508,27 @@ async def upload_pipes(file: UploadFile = File(...)):
             raise HTTPException(status_code=400, detail="Only Excel and CSV files are supported")
 
         content = await file.read()
-        file_path = f"uploads/{file.filename}"
+        file_id = generate_file_id()
+        safe_filename = _sanitize_upload_filename(file.filename)
+        file_path = os.path.join("uploads", f"{file_id}_{safe_filename}")
         with open(file_path, "wb") as buffer:
             buffer.write(content)
 
         parsed_df = parse_pipe_excel(io.BytesIO(content), file_name=file.filename)
 
-        file_id = generate_file_id()
         pipe_data[file_id] = {
             "filename": file.filename,
             "data": parsed_df.to_dict('records'),
-            "file_path": None,
+            "file_path": file_path,
             "columns": parsed_df.columns.tolist(),
             "record_count": len(parsed_df),
             "dataframe": parsed_df
         }
 
-        try:
-            os.remove(file_path)
-        except Exception as e:
-            print(f"⚠️ Could not delete file {file_path}: {e}")
-
         return {
             "message": "Pipe file uploaded successfully",
             "file_id": file_id,
+            "filename": file.filename,
             "record_count": len(parsed_df),
             "columns": parsed_df.columns.tolist()
         }
@@ -490,7 +546,8 @@ async def get_pipe_files():
             "file_id": fid,
             "filename": data["filename"],
             "record_count": data["record_count"],
-            "columns": data["columns"]
+            "columns": data["columns"],
+            "download_url": f"/uploaded-files/pipe/{fid}"
         }
         for fid, data in pipe_data.items()
     ]
@@ -535,10 +592,16 @@ async def analyze_dimensional_clustering(request: dict):
         )
 
         analysis_id = generate_file_id()
+        source_file = _build_source_file_metadata(
+            "weldment",
+            weldment_file_id,
+            weldment_data[weldment_file_id]["filename"]
+        )
 
         # Build stored result structure (same shape as before)
         analysis_results[analysis_id] = {
             "type": "clustering",
+            "source_file": source_file,
             "clustering": clustering_result,
             "bom_analysis": {
                 "similar_pairs": [],
@@ -552,7 +615,8 @@ async def analyze_dimensional_clustering(request: dict):
         return {
             "analysis_id": analysis_id,
             "clustering_result": analysis_results[analysis_id]["clustering"],
-            "bom_analysis_result": analysis_results[analysis_id]["bom_analysis"]
+            "bom_analysis_result": analysis_results[analysis_id]["bom_analysis"],
+            "source_file": source_file
         }
 
     except Exception as e:
@@ -583,9 +647,15 @@ async def analyze_bom_similarity(request: dict):
         bom_result = analyze_bom_data(df, threshold=threshold_percent)
 
         analysis_id = generate_file_id()
+        source_file = _build_source_file_metadata(
+            "bom",
+            bom_file_id,
+            bom_data[bom_file_id]["filename"]
+        )
 
         analysis_results_store = {
             "type": "bom_analysis",
+            "source_file": source_file,
             "clustering": {
                 "clusters": bom_result.get("clusters", []),
                 "metrics": {
@@ -616,7 +686,8 @@ async def analyze_bom_similarity(request: dict):
         return {
             "analysis_id": analysis_id,
             "clustering_result": analysis_results_store["clustering"],
-            "bom_analysis_result": analysis_results_store["bom_analysis"]
+            "bom_analysis_result": analysis_results_store["bom_analysis"],
+            "source_file": source_file
         }
 
     except Exception as e:
@@ -1162,8 +1233,14 @@ async def analyze_weldment_pairwise(request: dict):
         # 6) Store + return
         # ---------------------------------------------------
         analysis_id = generate_file_id()
+        source_file = _build_source_file_metadata(
+            "weldment",
+            weldment_file_id,
+            weldment_data[weldment_file_id]["filename"]
+        )
         analysis_store = {
             "type": "weldment_pairwise",
+            "source_file": source_file,
             "clustering": {
                 "clusters": [],
                 "metrics": {"n_clusters": 0, "n_samples": len(df), "silhouette_score": 0},
@@ -1195,7 +1272,8 @@ async def analyze_weldment_pairwise(request: dict):
             "analysis_id": analysis_id,
             "clustering_result": analysis_store["clustering"],
             "weldment_pairwise_result": analysis_store["weldment_pairwise"],
-            "bom_analysis_result": analysis_store["bom_analysis"]
+            "bom_analysis_result": analysis_store["bom_analysis"],
+            "source_file": source_file
         }
 
     except HTTPException:
@@ -1245,9 +1323,15 @@ async def analyze_pipe_pairwise(request: dict):
         comparison_res["replacement_suggestions"] = replacement_res
 
         analysis_id = generate_file_id()
+        source_file = _build_source_file_metadata(
+            "pipe",
+            pipe_file_id,
+            pipe_data[pipe_file_id]["filename"]
+        )
 
         analysis_store = {
             "type": "pipe_pairwise",
+            "source_file": source_file,
             "pipe_pairwise": comparison_res,
             "clustering": {
                 "clusters": [],
@@ -1277,7 +1361,8 @@ async def analyze_pipe_pairwise(request: dict):
             "analysis_id": analysis_id,
             "pipe_pairwise_result": comparison_res,
             "clustering_result": analysis_store["clustering"],
-            "bom_analysis_result": analysis_store["bom_analysis"]
+            "bom_analysis_result": analysis_store["bom_analysis"],
+            "source_file": source_file
         }
 
     except HTTPException:

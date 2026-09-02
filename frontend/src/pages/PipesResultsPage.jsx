@@ -18,11 +18,13 @@ import {
 } from 'antd';
 import { DownloadOutlined, FileExcelOutlined, FileTextOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 import { getAnalysisResults, exportPipeReport } from '../services/api';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 
 const PipesResultsPage = () => {
   const [results, setResults] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [exportLoading, setExportLoading] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -33,6 +35,7 @@ const PipesResultsPage = () => {
   useEffect(() => {
     if (location.state?.analysisResults?.pipe_pairwise) {
       setResults(location.state.analysisResults.pipe_pairwise);
+      setSourceFile(location.state.source_file || location.state.analysisResults?.source_file || null);
       setLoading(false);
     } else if (analysisId) {
       loadAnalysisResults();
@@ -49,6 +52,7 @@ const PipesResultsPage = () => {
       const raw = data.raw || data;
       const pipeRes = raw?.pipe_pairwise || raw?.pipe_pairwise_result || data.pipe_pairwise_result;
       setResults(pipeRes || null);
+      setSourceFile(data.source_file || raw?.source_file || null);
     } catch (err) {
       console.error('Error loading pipe results:', err);
       message.error('Failed to load pipe analysis results');
@@ -106,7 +110,8 @@ const PipesResultsPage = () => {
   const handleViewReplacementSuggestions = () => {
   navigate(`/results/pipes/replacements/${analysisId}`, {
     state: {
-      pipeAnalysis: results
+      pipeAnalysis: results,
+      source_file: sourceFile
     }
   });
   };
@@ -248,6 +253,18 @@ const PipesResultsPage = () => {
           </Button>
         </Space>
       </div>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
 
       {/* Stats row */}
       <Row gutter={16} style={{ marginBottom: 20 }}>

@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import { Card, Row, Col, Tag, Button, Typography, Divider } from "antd";
+import UploadedFileViewer from "../components/UploadedFileViewer";
 const { Title, Text } = Typography;
 
 /* Utility: normalize list input into array of items.
@@ -200,6 +201,7 @@ export default function BOMComparePage() {
   const navigate = useNavigate();
 
   const pair = location.state?.pair || {};
+  const sourceFile = location.state?.source_file || null;
 
   const bomA = pair.bom_a || pair.bomA || bomAparam || "BOM_A";
   const bomB = pair.bom_b || pair.bomB || bomBparam || "BOM_B";
@@ -353,6 +355,18 @@ export default function BOMComparePage() {
           <Button onClick={() => navigate(-1)}>Back</Button>
         </Col>
       </Row>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
 
       <Card style={{ marginBottom: 16 }}>
         <Row align="middle">

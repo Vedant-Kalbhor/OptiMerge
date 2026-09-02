@@ -31,6 +31,7 @@ backend/*.local
 backend/build/
 backend/dist/
 backend/*.egg-info/
+backend/uploads/
 
 # Testing
 backend/.pytest_cache/

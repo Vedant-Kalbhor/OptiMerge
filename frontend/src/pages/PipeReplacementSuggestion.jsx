@@ -4,6 +4,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { getAnalysisResults } from '../services/api';
 import { saveAs } from 'file-saver';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 
 const { Panel } = Collapse;
 const { Text } = Typography;
@@ -23,6 +24,7 @@ const PipeReplacementSuggestion = () => {
     avgAbsSavings: 0,
     savingsPct: 0
   });
+  const sourceFile = analysis?.source_file || analysis?.raw?.source_file || null;
 
   useEffect(() => {
     const fromState =
@@ -31,7 +33,11 @@ const PipeReplacementSuggestion = () => {
       location.state?.suggestions;
 
     if (fromState) {
-      setAnalysis(fromState);
+      const resolvedSourceFile = location.state?.source_file || fromState.source_file || null;
+      const mergedAnalysis = resolvedSourceFile
+        ? { ...fromState, source_file: resolvedSourceFile }
+        : fromState;
+      setAnalysis(mergedAnalysis);
       processReplacementData(fromState);
     } else if (analysisId) {
       loadAnalysis(analysisId);
@@ -310,6 +316,18 @@ const PipeReplacementSuggestion = () => {
   return (
     <div>
       <h1>Replacement Suggestions — Exact Matches (100%)</h1>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
 
       <Card style={{ marginBottom: 16, padding: 18 }}>
         {loading ? (

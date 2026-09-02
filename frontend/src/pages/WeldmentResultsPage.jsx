@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { DownloadOutlined, BarChartOutlined, CalculatorOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 
@@ -23,6 +24,7 @@ const { Panel } = Collapse;
 
 const WeldmentResultsPage = () => {
   const [results, setResults] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [totalAssemblies, setTotalAssemblies] = useState(0);
   const { analysisId } = useParams();
@@ -39,6 +41,7 @@ const WeldmentResultsPage = () => {
   useEffect(() => {
     if (location.state?.analysisResults?.weldment_pairwise) {
       setResults(location.state.analysisResults.weldment_pairwise);
+      setSourceFile(location.state.source_file || location.state.analysisResults?.source_file || null);
       if (location.state.totalAssemblies) {
         setTotalAssemblies(location.state.totalAssemblies);
       } else if (location.state.analysisResults?.weldment_pairwise?.parameters?.total_assemblies) {
@@ -64,6 +67,7 @@ const WeldmentResultsPage = () => {
         raw?.weldment_pairwise_result ||
         data.weldment_pairwise_result;
       setResults(weld || null);
+      setSourceFile(data.source_file || raw?.source_file || null);
       
       if (weld?.parameters?.total_assemblies) {
         setTotalAssemblies(weld.parameters.total_assemblies);
@@ -416,6 +420,18 @@ const WeldmentResultsPage = () => {
     return (
       <div>
         <h1>Weldment One-to-One Comparison (with Cost & EAU)</h1>
+
+        {sourceFile && (
+          <Card style={{ marginBottom: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontWeight: 600 }}>Source File</div>
+                <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+              </div>
+              <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+            </div>
+          </Card>
+        )}
 
         <Row gutter={16} style={{ marginBottom: 18 }}>
           <Col span={8}>

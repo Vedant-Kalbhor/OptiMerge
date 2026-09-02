@@ -10,6 +10,7 @@ import { DownloadOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { getAnalysisResults } from '../services/api';
 import { saveAs } from 'file-saver';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 
 const { Panel } = Collapse;
 const { Text, Title } = Typography;
@@ -25,11 +26,16 @@ const BOMReplacementSuggestion = () => {
   const [perVariantRows, setPerVariantRows] = useState([]); // rows: { groupId, fromId, toId, costFrom, costTo, savingAbs, savingPct, currency }
   const [overallSavings, setOverallSavings] = useState({ totalOriginal: 0, totalSavings: 0, savingsPct: 0, currency: '' });
   const [assemblyCosts, setAssemblyCosts] = useState({}); // mapping assemblyId -> cost
+  const sourceFile = analysis?.source_file || analysis?.raw?.source_file || null;
 
   useEffect(() => {
     const fromState = location.state?.analysisResults || location.state?.suggestions || location.state?.bomAnalysis;
     if (fromState && fromState.bom_analysis) {
-      setAnalysis(fromState);
+      const resolvedSourceFile = location.state?.source_file || fromState.source_file || null;
+      const mergedAnalysis = resolvedSourceFile
+        ? { ...fromState, source_file: resolvedSourceFile }
+        : fromState;
+      setAnalysis(mergedAnalysis);
       buildGroups(fromState.bom_analysis);
     } else if (location.state && location.state.similarity_matrix) {
       setAnalysis({ bom_analysis: location.state });
@@ -294,6 +300,18 @@ const BOMReplacementSuggestion = () => {
   return (
     <div>
       <h1>Replacement Suggestions — Exact Matches (100%)</h1>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
 
       {/* --- Dashboard: BOM summary (updated design and order) --- */}
       <Card style={{ marginBottom: 16, padding: 18 }}>

@@ -3,11 +3,13 @@ import { Card, Table, Tag, Progress, Row, Col, Alert, Button, Spin, Modal, messa
 import { DownloadOutlined, EyeOutlined, ClusterOutlined, BarChartOutlined } from '@ant-design/icons';
 import { saveAs } from 'file-saver';
 import ClusterChart from '../components/ClusterChart';
+import UploadedFileViewer from '../components/UploadedFileViewer';
 import { getAnalysisResults } from '../services/api';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 
 const ResultsPage = () => {
   const [analysisResults, setAnalysisResults] = useState(null);
+  const [sourceFile, setSourceFile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [clusterModalVisible, setClusterModalVisible] = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(null);
@@ -20,6 +22,7 @@ const ResultsPage = () => {
     if (location.state?.analysisResults) {
       console.log('Results from state:', location.state.analysisResults);
       setAnalysisResults(location.state.analysisResults);
+      setSourceFile(location.state.source_file || location.state.analysisResults?.source_file || null);
       setLoading(false);
     } else if (analysisId) {
       loadAnalysisResults();
@@ -35,6 +38,7 @@ const ResultsPage = () => {
       const response = await getAnalysisResults(analysisId);
       console.log('Analysis results received:', response.data);
       setAnalysisResults(response.data);
+      setSourceFile(response.data.source_file || response.data.raw?.source_file || null);
     } catch (error) {
       console.error('Error loading analysis results:', error);
       message.error('Failed to load analysis results');
@@ -377,6 +381,18 @@ const ResultsPage = () => {
   return (
     <div>
       <h1>Analysis Results</h1>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>{sourceFile.filename}</div>
+            </div>
+            <UploadedFileViewer sourceFile={sourceFile} buttonText="View Uploaded File" />
+          </div>
+        </Card>
+      )}
       
       <Alert
         message="Analysis Complete"
