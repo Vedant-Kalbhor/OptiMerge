@@ -498,6 +498,64 @@ const PreviousAnalysisPage = () => {
     }
   ];
 
+
+  const pipeColumns = [
+  {
+    title: 'Part A',
+    dataIndex: 'Part A',
+    key: 'part_a',
+    sorter: (a, b) => String(a['Part A'] || '').localeCompare(String(b['Part A'] || '')),
+    render: (t) => <span style={{ fontFamily: 'monospace' }}>{t}</span>
+  },
+  {
+    title: 'Part B',
+    dataIndex: 'Part B',
+    key: 'part_b',
+    sorter: (a, b) => String(a['Part B'] || '').localeCompare(String(b['Part B'] || '')),
+    render: (t) => <span style={{ fontFamily: 'monospace' }}>{t}</span>
+  },
+  {
+    title: 'Bends %',
+    dataIndex: 'Bends %',
+    key: 'bends',
+    sorter: (a, b) => Number(a['Bends %'] || 0) - Number(b['Bends %'] || 0),
+    render: (v) => `${Number(v || 0).toFixed(1)}%`
+  },
+  {
+    title: 'X %',
+    dataIndex: 'X %',
+    key: 'x',
+    sorter: (a, b) => Number(a['X %'] || 0) - Number(b['X %'] || 0),
+    render: (v) => `${Number(v || 0).toFixed(1)}%`
+  },
+  {
+    title: 'Y %',
+    dataIndex: 'Y %',
+    key: 'y',
+    sorter: (a, b) => Number(a['Y %'] || 0) - Number(b['Y %'] || 0),
+    render: (v) => `${Number(v || 0).toFixed(1)}%`
+  },
+  {
+    title: 'Z %',
+    dataIndex: 'Z %',
+    key: 'z',
+    sorter: (a, b) => Number(a['Z %'] || 0) - Number(b['Z %'] || 0),
+    render: (v) => `${Number(v || 0).toFixed(1)}%`
+  },
+  {
+    title: 'Match %',
+    dataIndex: 'Match %',
+    key: 'match',
+    sorter: (a, b) => Number(a['Match %'] || 0) - Number(b['Match %'] || 0),
+    render: (v) => (
+      <Progress
+        percent={Math.round(Number(v) || 0)}
+        size="small"
+        format={(p) => `${p.toFixed(1)}%`}
+      />
+    )
+  }
+];
   const bomResultsLocal = raw?.bom_analysis || (doc?.bom_analysis) || (location.state?.analysisResults?.bom_analysis) || null;
 
   const histogram = useMemo(() => {
@@ -595,12 +653,13 @@ const PreviousAnalysisPage = () => {
     );
   }
 
-  const analysisType =
-    raw?.type ||
-    doc?.type ||
-    (raw?.clustering ? 'clustering'
-      : raw?.weldment_pairwise ? 'weldment_pairwise'
-        : raw?.bom_analysis ? 'bom_analysis'
+const analysisType =
+  raw?.type ||
+  doc?.type ||
+  (raw?.pipe_pairwise ? 'pipe_pairwise'
+    : raw?.weldment_pairwise ? 'weldment_pairwise'
+      : raw?.bom_analysis ? 'bom_analysis'
+        : raw?.clustering ? 'clustering'
           : 'unknown');
   const sourceFile = raw?.source_file || doc?.source_file || null;
 
@@ -1096,6 +1155,267 @@ const PreviousAnalysisPage = () => {
       </div>
     );
   }
+
+  // If this is pipe pairwise, render pipe UI
+if (analysisType === 'pipe_pairwise' || raw.pipe_pairwise) {
+  const pipe = raw.pipe_pairwise || raw.pipe_pairwise_result || raw;
+
+  const mode = pipe?.parameters?.mode || 'xyz_only';
+  const threshold = pipe?.parameters?.threshold ?? 0;
+  const totalPipes = pipe?.parameters?.total_pipes ?? 0;
+  const matchedPairs =
+    pipe?.statistics?.pairs_above_threshold ??
+    pipe?.pairwise_table?.length ??
+    0;
+
+  const priceAvailable = pipe?.price_available === true;
+  const replacementData = pipe?.replacement_suggestions || null;
+
+  const pipeTableColumns =
+    mode === 'xyz_bends'
+      ? pipeColumns
+      : pipeColumns.filter(column => column.key !== 'bends');
+
+  return (
+    <div style={{ padding: 20 }}>
+      <h2>Previous Analysis Result (Pipe Pairwise)</h2>
+
+      {sourceFile && (
+        <Card style={{ marginBottom: 20 }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap'
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 600 }}>Source File</div>
+              <div style={{ color: '#666' }}>
+                {sourceFile.filename}
+              </div>
+            </div>
+
+            <UploadedFileViewer
+              sourceFile={sourceFile}
+              buttonText="View Uploaded File"
+            />
+          </div>
+        </Card>
+      )}
+
+      <Row gutter={16} style={{ marginBottom: 20 }}>
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="Total Pipe Items"
+              value={totalPipes}
+              valueStyle={{ color: '#1890ff' }}
+            />
+          </Card>
+        </Col>
+
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="Matched Pairs"
+              value={matchedPairs}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="Analysis Mode"
+              value={mode === 'xyz_bends' ? 'XYZ + Bends' : 'XYZ Only'}
+              valueStyle={{ color: '#722ed1', fontSize: 20 }}
+            />
+          </Card>
+        </Col>
+
+        <Col xs={24} sm={12} md={6}>
+          <Card>
+            <Statistic
+              title="Similarity Threshold"
+              value={threshold}
+              precision={1}
+              suffix="%"
+              valueStyle={{ color: '#fa8c16' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      <Card style={{ marginBottom: 20 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 22,
+                fontWeight: 'bold',
+                color: '#1890ff'
+              }}
+            >
+              {pipe?.pairwise_table?.length || 0} pairs
+            </div>
+
+            <div style={{ color: '#666' }}>
+              Pipe pairs above threshold
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      {priceAvailable ? (
+        <Card
+          style={{
+            marginBottom: 20,
+            background: '#f6ffed',
+            borderColor: '#b7eb8f'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 16,
+              flexWrap: 'wrap'
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  fontSize: 18,
+                  fontWeight: 600,
+                  color: '#389e0d'
+                }}
+              >
+                Price data available
+              </div>
+
+              <div style={{ color: '#666', marginTop: 4 }}>
+                Cost-effective pipe replacement suggestions are available.
+              </div>
+            </div>
+
+            <Button
+              type="primary"
+              onClick={() =>
+                navigate(`/results/pipes/replacements/${analysisId}`, {
+                  state: {
+                    pipeAnalysis: pipe,
+                    source_file: sourceFile
+                  }
+                })
+              }
+              style={{
+                background: '#389e0d',
+                borderColor: '#237804',
+                borderRadius: '6px'
+              }}
+            >
+              View Replacement Suggestions
+            </Button>
+          </div>
+        </Card>
+      ) : (
+        <Alert
+          message="Price data not available"
+          description="Replacement suggestions based on pipe cost cannot be generated because the uploaded pipe file does not contain price information."
+          type="warning"
+          showIcon
+          style={{ marginBottom: 20 }}
+        />
+      )}
+
+      <Card
+        title="Pipe One-to-One Comparison"
+        style={{ marginBottom: 20 }}
+      >
+        <Table
+          columns={pipeTableColumns}
+          dataSource={pipe?.pairwise_table || []}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: true,
+            pageSizeOptions: ['20', '50', '100'],
+            showTotal: (total, range) =>
+              `${range[0]}-${range[1]} of ${total} pairs`
+          }}
+          scroll={{ x: 'max-content' }}
+          rowKey={(r, i) =>
+            `${r['Part A'] || 'a'}-${r['Part B'] || 'b'}-${i}`
+          }
+        />
+      </Card>
+
+      {priceAvailable && replacementData?.summary && (
+        <Card title="Replacement Summary">
+          <Row gutter={16}>
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="Replacement Opportunities"
+                value={
+                  replacementData.summary
+                    ?.replacement_opportunities || 0
+                }
+              />
+            </Col>
+
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="Total Savings"
+                value={
+                  replacementData.summary?.total_savings || 0
+                }
+                precision={2}
+                prefix="£"
+                valueStyle={{ color: '#52c41a' }}
+              />
+            </Col>
+
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="Average Savings"
+                value={
+                  replacementData.summary?.average_savings || 0
+                }
+                precision={2}
+                prefix="£"
+              />
+            </Col>
+
+            <Col xs={24} sm={12} md={6}>
+              <Statistic
+                title="Average Savings %"
+                value={
+                  replacementData.summary
+                    ?.average_savings_percent || 0
+                }
+                precision={2}
+                suffix="%"
+                valueStyle={{ color: '#722ed1' }}
+              />
+            </Col>
+          </Row>
+        </Card>
+      )}
+    </div>
+  );
+}
 
   // Default: clustering / bom UI (same look as ResultsPage)
   const clustersNormalized = normalizeClusters(raw?.clustering?.clusters || []);
