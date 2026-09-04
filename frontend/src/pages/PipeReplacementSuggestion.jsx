@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import { Card, Table, Button, Alert, Spin, message, Collapse, Typography } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
@@ -67,20 +67,23 @@ const PipeReplacementSuggestion = () => {
   const currencySymbol = (curr) => {
     if (!curr) return '';
     const map = {
-      GBP: '£',
-      gbp: '£',
+      GBP: '\u20A9',
+      gbp: '\u20A9',
       USD: '$',
       usd: '$',
       EUR: '€',
       eur: '€',
       INR: '₹',
-      inr: '₹'
+      inr: '₹',
+      KRW: '\u20A9',
+      krw: '\u20A9'
     };
-    return map[curr] || curr;
+    const normalized = String(curr).trim();
+    return map[normalized] || map[normalized.toUpperCase()] || normalized;
   };
 
   const fmtMoney = (val, currCode) => {
-    const sym = currencySymbol(currCode || 'GBP');
+    const sym = currencySymbol(currCode || 'KRW');
     const v = Number(val || 0).toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
@@ -315,7 +318,7 @@ const PipeReplacementSuggestion = () => {
 
   return (
     <div>
-      <h1>Replacement Suggestions — Exact Matches (100%)</h1>
+      <h1>Replacement Suggestions Exact Matches (100%)</h1>
 
       {sourceFile && (
         <Card style={{ marginBottom: 16 }}>
@@ -475,8 +478,8 @@ const PipeReplacementSuggestion = () => {
               }}
             >
               <span style={{ color: '#6b7280' }}>
-                Optimization reduces {replacedPipes} pipes →{' '}
-                {pipesAfterReplacement} unique pipes remain
+                Optimization reduces {replacedPipes} pipes {' '}.
+                Now {pipesAfterReplacement} unique pipes remain after replacement.
               </span>
 
               <span
@@ -695,7 +698,7 @@ const PipeReplacementSuggestion = () => {
                                   member.price
                                 )
                               )
-                              .join(', ') || '—'}
+                              .join(', ') || '₩”'}
                           </Text>
                         </div>
 
@@ -713,7 +716,7 @@ const PipeReplacementSuggestion = () => {
                                   cheapestMember.item_code,
                                   cheapestMember.price
                                 )
-                              : '—'}
+                              : '₩”'}
                           </Text>
                         </div>
 
@@ -744,7 +747,7 @@ const PipeReplacementSuggestion = () => {
                                       row.fromId,
                                       row.costFrom
                                     )}{' '}
-                                    →{' '}
+                                    â†’{' '}
                                     {getPipeLabel(
                                       row.toId,
                                       row.costTo
