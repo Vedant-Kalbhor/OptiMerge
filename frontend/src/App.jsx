@@ -26,6 +26,9 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import DimensionExtractionPage from './pages/DimensionExtractionPage';
 import BendResultsPage from './pages/BendResultsPage';
 import BendReplacementSuggestionPage from './pages/BendReplacementSuggestion';
+
+import EngineeringDrawingOCRPage from './pages/EngineeringDrawingOCRPage';
+
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
@@ -121,6 +124,7 @@ function App() {
                     <Route path="/extract-dimensions" element={<PrivateRoute><DimensionExtractionPage /></PrivateRoute>} />
                     <Route path="/results/bends/:analysisId" element={<BendResultsPage />}/>
                     <Route path="/results/bends/replacements/:analysisId"element={<BendReplacementSuggestionPage />}/>
+                    <Route path="/engineering-drawing-ocr" element={<PrivateRoute><EngineeringDrawingOCRPage /></PrivateRoute>} />
                     {/* Fallback route */}
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>

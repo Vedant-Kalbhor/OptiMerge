@@ -315,4 +315,21 @@ export const analyzeBendPairwise = async (data) => {
   }
 };
 
+export const uploadImageOrPdf = async (formData) => {
+  try {
+    console.log('Uploading engineering drawing...');
+    const response = await api.post('/upload/image-or-pdf/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+      responseType: 'blob',
+      timeout: 3000000,
+    });
+    return response;
+  } catch (error) {
+    console.error('Engineering drawing upload error:', error);
+    throw error;
+  }
+};
+
 export default api;

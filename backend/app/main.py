@@ -38,6 +38,12 @@ from .pipe_utils import (
     generate_pipe_replacement_suggestions
 )
 from .bend_analysis import analyze_bend_data
+
+from app.services.ocr_service import OCRService
+from app.services.pdf_service import PDFService
+from app.services.excel_service import ExcelService
+from app.exceptions import OCRProcessingError
+
 app = FastAPI(title="BOM Optimization Tool", version="1.0.0")
 
 # ==============================
@@ -55,6 +61,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+ocr_service = OCRService()
+pdf_service = PDFService(ocr_service)
+excel_service = ExcelService()
 
 # ==============================
 # Auth / JWT configuration
@@ -1651,6 +1660,249 @@ async def extract_dimensions_bbox(file: UploadFile = File(...)):
     if result["status"] == "error":
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+# Old Code
+# @app.post("/upload/image-or-pdf/")
+# async def upload_image_or_pdf(
+#     file: UploadFile = File(...)
+# ):
+#     try:
+#         print(f"Processing file: {file.filename}")
+
+#         filename = file.filename.lower()
+
+#         # Validate file type
+#         if not filename.endswith((".jpg", ".jpeg", ".png", ".pdf")):
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="Only JPG, JPEG, PNG and PDF files are supported"
+#             )
+
+#         # Read file
+#         content = await file.read()
+
+#         if not content:
+#             raise HTTPException(
+#                 status_code=400,
+#                 detail="Uploaded file is empty."
+#             )
+
+#         # -----------------------------
+#         # Process image
+#         # -----------------------------
+#         if filename.endswith((".jpg", ".jpeg", ".png")):
+
+#             result = ocr_service.process_image_bytes(
+#                 content,
+#                 file.filename
+#             )
+
+#             results = [result]
+
+#         # -----------------------------
+#         # Process PDF
+#         # -----------------------------
+#         else:
+
+#             results = pdf_service.process_pdf(
+#                 content,
+#                 file.filename,
+#                 max_pages=500
+#             )
+
+#         if not results:
+#             raise OCRProcessingError(
+#                 "No data could be extracted from the file."
+#             )
+
+#         # -----------------------------
+#         # Generate Excel
+#         # -----------------------------
+#         excel_bytes = excel_service.build_excel(
+#             results=results
+#         )
+
+#         output_filename = (
+#             f"{file.filename.rsplit('.', 1)[0]}"
+#             f"_extraction.xlsx"
+#         )
+
+#         print(
+#             f"Excel generated successfully: "
+#             f"{output_filename}"
+#         )
+
+#         return Response(
+#             content=excel_bytes,
+#             media_type=(
+#                 "application/vnd.openxmlformats-officedocument."
+#                 "spreadsheetml.sheet"
+#             ),
+#             headers={
+#                 "Content-Disposition":
+#                     f'attachment; filename="{output_filename}"'
+#             }
+#         )
+
+#     except HTTPException:
+#         raise
+
+#     except OCRProcessingError as e:
+#         print(f"OCR processing error: {str(e)}")
+
+#         raise HTTPException(
+#             status_code=400,
+#             detail=str(e)
+#         )
+
+#     except Exception as e:
+#         print(f"Error processing file: {str(e)}")
+
+#         raise HTTPException(
+#             status_code=500,
+#             detail=f"Error processing file: {str(e)}"
+#         )
+
+@app.post("/upload/image-or-pdf/")
+async def upload_image_or_pdf(
+    file: Optional[UploadFile] = File(None),
+    files: List[UploadFile] = File(default=[])
+):
+    try:
+        results = []
+        is_image = False
+
+        # --------------------------------
+        # Multiple image upload
+        # --------------------------------
+        if files:
+
+            if file is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Upload either one file or multiple images."
+                )
+
+            is_image = True
+
+            for uploaded_file in files:
+
+                filename = uploaded_file.filename.lower()
+
+                if not filename.endswith((".jpg", ".jpeg", ".png")):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Multiple upload supports JPG, JPEG and PNG images only."
+                    )
+
+                content = await uploaded_file.read()
+
+                if not content:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"{uploaded_file.filename} is empty."
+                    )
+
+                result = ocr_service.process_image_bytes(
+                    content,
+                    uploaded_file.filename
+                )
+
+                results.append(result)
+
+        # --------------------------------
+        # Single image or PDF upload
+        # --------------------------------
+        elif file is not None:
+
+            filename = file.filename.lower()
+
+            if not filename.endswith(
+                (".jpg", ".jpeg", ".png", ".pdf")
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Only JPG, JPEG, PNG and PDF files are supported."
+                )
+
+            content = await file.read()
+
+            if not content:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Uploaded file is empty."
+                )
+
+            if filename.endswith((".jpg", ".jpeg", ".png")):
+
+                is_image = True
+
+                result = ocr_service.process_image_bytes(
+                    content,
+                    file.filename
+                )
+
+                results = [result]
+
+            else:
+
+                # Existing PDF functionality remains unchanged
+                results = pdf_service.process_pdf(
+                    content,
+                    file.filename,
+                    max_pages=200
+                )
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Please upload an image or PDF."
+            )
+
+        if not results:
+            raise HTTPException(
+                status_code=400,
+                detail="No data extracted from uploaded files."
+            )
+
+        # --------------------------------
+        # Generate Excel
+        # --------------------------------
+        excel_bytes = excel_service.build_excel(
+            results=results,
+            is_image=is_image
+        )
+
+        output_filename = "extraction.xlsx"
+
+        return Response(
+            content=excel_bytes,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "spreadsheetml.sheet"
+            ),
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="{output_filename}"'
+            }
+        )
+
+    except HTTPException:
+        raise
+
+    except OCRProcessingError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=str(e)
+        )
+
+    except Exception as e:
+        print(f"Error processing file: {str(e)}")
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing file: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
