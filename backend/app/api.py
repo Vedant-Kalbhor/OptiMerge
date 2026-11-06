@@ -2,8 +2,12 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from fastapi.responses import JSONResponse
 import pandas as pd
 from io import BytesIO
-from preprocess import preprocess_weldment_file
-from ml_pipeline import run_clustering
+try:
+    from app.preprocess import preprocess_weldment_file
+    from app.ml_pipeline import run_clustering
+except ImportError:
+    from preprocess import preprocess_weldment_file
+    from ml_pipeline import run_clustering
 
 router = APIRouter()
 

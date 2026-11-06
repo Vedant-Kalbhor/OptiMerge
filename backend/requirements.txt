@@ -18,3 +18,15 @@ pydantic[email]==2.11.7
 pymysql>=1.1.2
 pymongo>=4.16.0
 pymupdf
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+pillow>=10.0.0
+hdbscan>=0.8.33
+umap-learn>=0.5.5
+cryptography>=42.0.0
+opencv-python>=4.8.0
+pytesseract>=0.3.10
+pillow>=10.0.0
+hdbscan>=0.8.33
+umap-learn>=0.5.5
+cryptography>=42.0.0
