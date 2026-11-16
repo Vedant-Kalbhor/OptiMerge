@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import OAuth2PasswordBearer
 import pandas as pd
 import os
+import io
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
@@ -38,6 +39,17 @@ from .pipe_utils import (
     generate_pipe_replacement_suggestions
 )
 from .bend_analysis import analyze_bend_data
+from .custom_analysis_store import (
+    list_templates as list_custom_templates,
+    get_template as get_custom_template,
+    save_template as save_custom_template,
+    delete_template as delete_custom_template,
+    extract_headers_from_file as extract_headers_from_custom_file,
+)
+from .custom_analysis_engine import (
+    run_custom_pairwise_analysis,
+    generate_custom_excel_report,
+)
 
 from app.services.ocr_service import OCRService
 from app.services.pdf_service import PDFService
@@ -266,6 +278,7 @@ bom_data = {}
 pipe_data = {}
 analysis_results = {}
 bend_data = {}
+custom_data = {}
 
 def generate_file_id():
     return str(uuid.uuid4())
@@ -292,6 +305,7 @@ def _get_uploaded_record(file_kind: str, file_id: str):
         "bom": bom_data,
         "pipe": pipe_data,
         "bend": bend_data,
+        "custom": custom_data,
     }
     store = store_map.get(file_kind)
     if not store or file_id not in store:
@@ -569,7 +583,7 @@ async def get_weldment_data(file_id: str):
 @app.get("/uploaded-files/{file_kind}/{file_id}")
 async def get_uploaded_file(file_kind: str, file_id: str):
     """Return the exact uploaded file for preview or download."""
-    if file_kind not in {"weldment", "bom", "pipe" , "bend"}:
+    if file_kind not in {"weldment", "bom", "pipe", "bend", "custom"}:
         raise HTTPException(status_code=400, detail="Unsupported file type")
 
     record = _resolve_uploaded_file_path(file_kind, file_id)
@@ -657,6 +671,65 @@ async def get_pipe_data(file_id: str):
         "data": pipe_data[file_id]["data"],
         "columns": pipe_data[file_id]["columns"]
     }
+
+
+@app.post("/upload/custom/")
+async def upload_custom(file: UploadFile = File(...)):
+    """Upload custom data file (Excel or CSV)"""
+    try:
+        if not file.filename.endswith(('.xlsx', '.xls', '.csv')):
+            raise HTTPException(status_code=400, detail="Only Excel and CSV files are supported")
+
+        content = await file.read()
+        file_id = generate_file_id()
+        safe_filename = _sanitize_upload_filename(file.filename)
+        file_path = os.path.join("uploads", f"{file_id}_{safe_filename}")
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+
+        if file.filename.endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(content))
+        else:
+            df = pd.read_excel(io.BytesIO(content))
+
+        # Store in-memory
+        custom_data[file_id] = {
+            "filename": file.filename,
+            "data": df.head(50).to_dict('records'),
+            "file_path": file_path,
+            "columns": [str(c) for c in df.columns],
+            "record_count": len(df),
+            "dataframe": df
+        }
+
+        return {
+            "message": "File uploaded successfully",
+            "file_id": file_id,
+            "filename": file.filename,
+            "record_count": len(df),
+            "columns": [str(c) for c in df.columns],
+            "download_url": f"/uploaded-files/custom/{file_id}"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error uploading custom file: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process custom file: {str(e)}")
+
+
+@app.get("/files/custom/")
+async def get_custom_files():
+    """Get list of uploaded custom files"""
+    return [
+        {
+            "file_id": fid,
+            "filename": data["filename"],
+            "record_count": data["record_count"],
+            "columns": data["columns"],
+            "download_url": f"/uploaded-files/custom/{fid}"
+        }
+        for fid, data in custom_data.items()
+    ]
 
 
 
@@ -1903,6 +1976,174 @@ async def upload_image_or_pdf(
             status_code=500,
             detail=f"Error processing file: {str(e)}"
         )
+
+# ==============================
+# Custom Analysis Execution Endpoints
+# ==============================
+@app.post("/analyze/custom-pairwise/")
+async def analyze_custom_pairwise(request: dict):
+    """
+    Run custom pairwise similarity analysis.
+    Request: {
+        "custom_file_id": str,
+        "template_id": str,
+        "threshold": Optional[float]
+    }
+    """
+    try:
+        custom_file_id = request.get("custom_file_id")
+        template_id = request.get("template_id")
+        threshold = request.get("threshold")
+
+        if not custom_file_id:
+            raise HTTPException(status_code=400, detail="custom_file_id is required")
+        if not template_id:
+            raise HTTPException(status_code=400, detail="template_id is required")
+
+        template = get_custom_template(template_id)
+        if not template:
+            raise HTTPException(status_code=404, detail=f"Custom template '{template_id}' not found")
+
+        # Resolve file
+        df = None
+        source_filename = "uploaded_file"
+        if custom_file_id in custom_data:
+            df = custom_data[custom_file_id].get("dataframe")
+            source_filename = custom_data[custom_file_id].get("filename", "uploaded_file")
+
+        if df is None:
+            record = _resolve_uploaded_file_path("custom", custom_file_id)
+            if not record or not record.get("file_path"):
+                raise HTTPException(status_code=404, detail="Uploaded file not found")
+            file_path = record["file_path"]
+            source_filename = record.get("filename", "uploaded_file")
+            if file_path.endswith('.csv'):
+                df = pd.read_csv(file_path)
+            else:
+                df = pd.read_excel(file_path)
+
+        if df is None or len(df) == 0:
+            raise HTTPException(status_code=400, detail="The uploaded file contains no data")
+
+        # Run custom pairwise comparison
+        result = run_custom_pairwise_analysis(
+            df=df,
+            template=template,
+            threshold=threshold
+        )
+
+        analysis_id = generate_file_id()
+        source_file = _build_source_file_metadata("custom", custom_file_id, source_filename)
+
+        analysis_store = {
+            "custom_analysis": result,
+            "template": template,
+            "source_file": source_file,
+            "created_at": datetime.utcnow().isoformat()
+        }
+
+        analysis_results[analysis_id] = analysis_store
+
+        save_analysis_to_mongodb(
+            analysis_id,
+            f"Custom: {template.get('name', 'Custom Analysis')}",
+            analysis_store
+        )
+
+        return {
+            "analysis_id": analysis_id,
+            "custom_analysis_result": result,
+            "template": template,
+            "source_file": source_file
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("Custom pairwise analysis error:", str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Custom analysis failed: {str(e)}")
+
+
+@app.get("/export/custom/{analysis_id}")
+async def export_custom_analysis(analysis_id: str):
+    """
+    Export custom analysis results to Excel (.xlsx) format.
+    """
+    try:
+        analysis_doc = analysis_collection.find_one({"id": analysis_id})
+        raw = analysis_doc.get("raw") if analysis_doc else analysis_results.get(analysis_id)
+
+        if not raw:
+            raise HTTPException(status_code=404, detail="Analysis not found")
+
+        custom_res = raw.get("custom_analysis") or raw.get("custom_analysis_result")
+        if not custom_res:
+            raise HTTPException(status_code=404, detail="No custom analysis data in this report")
+
+        excel_bytes = generate_custom_excel_report(custom_res)
+        template_name = re.sub(r'[^A-Za-z0-9_]+', '_', custom_res.get("template_name", "Custom_Analysis"))
+        filename = f"{template_name}_Comparison_Report.xlsx"
+
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        print("Export custom report error:", str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to export custom report: {str(e)}")
+
+
+# ==============================
+# Custom Analysis Templates Endpoints
+# ==============================
+@app.get("/custom-analyses/")
+async def get_all_custom_templates():
+    return list_custom_templates()
+
+@app.get("/custom-analyses/{template_id}")
+async def get_single_custom_template(template_id: str):
+    template = get_custom_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Custom analysis template not found")
+    return template
+
+@app.post("/custom-analyses/")
+async def create_or_save_custom_template(template_data: Dict[str, Any]):
+    try:
+        saved = save_custom_template(template_data)
+        return {"message": "Custom analysis template saved successfully", "template": saved}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to save template: {str(e)}")
+
+@app.put("/custom-analyses/{template_id}")
+async def update_custom_template(template_id: str, template_data: Dict[str, Any]):
+    try:
+        template_data["id"] = template_id
+        saved = save_custom_template(template_data)
+        return {"message": "Custom analysis template updated successfully", "template": saved}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to update template: {str(e)}")
+
+@app.delete("/custom-analyses/{template_id}")
+async def remove_custom_template(template_id: str):
+    success = delete_custom_template(template_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Custom analysis template not found")
+    return {"message": "Custom analysis template deleted successfully"}
+
+@app.post("/custom-analyses/extract-headers/")
+async def extract_template_headers(file: UploadFile = File(...)):
+    try:
+        content = await file.read()
+        headers = extract_headers_from_custom_file(content, file.filename)
+        return {"headers": headers, "filename": file.filename}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read headers from file: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

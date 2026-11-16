@@ -8,6 +8,7 @@ import {
   MenuUnfoldOutlined,
   FilePdfOutlined,   // ← add this
   ScanOutlined,
+  SlidersOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -19,6 +20,7 @@ const Sidebar = ({ collapsed, toggleCollapse }) => {
     { key: '/',           icon: <DashboardOutlined />, label: 'Dashboard' },
     { key: '/upload',     icon: <UploadOutlined />,    label: 'Upload Files' },
     { key: '/analysis',   icon: <BarChartOutlined />,  label: 'Analysis' },
+    { key: '/custom-analysis', icon: <SlidersOutlined />, label: 'Custom Analysis' },
     { key: '/extract-dimensions', icon: <FilePdfOutlined />, label: 'Extract Dimensions' },  // ← add this
     { key: '/engineering-drawing-ocr', icon: <ScanOutlined />, label: 'Extract SnapShot' },
   ];

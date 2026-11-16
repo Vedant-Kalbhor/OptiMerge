@@ -332,4 +332,105 @@ export const uploadImageOrPdf = async (formData) => {
   }
 };
 
+// Custom Analysis Endpoints
+export const getCustomAnalyses = async () => {
+  try {
+    return await api.get('/custom-analyses/');
+  } catch (error) {
+    console.error('Failed to fetch custom analyses:', error);
+    throw error;
+  }
+};
+
+export const getCustomAnalysis = async (id) => {
+  try {
+    return await api.get(`/custom-analyses/${id}`);
+  } catch (error) {
+    console.error(`Failed to fetch custom analysis ${id}:`, error);
+    throw error;
+  }
+};
+
+export const saveCustomAnalysis = async (data) => {
+  try {
+    return await api.post('/custom-analyses/', data);
+  } catch (error) {
+    console.error('Failed to save custom analysis:', error);
+    throw error;
+  }
+};
+
+export const updateCustomAnalysis = async (id, data) => {
+  try {
+    return await api.put(`/custom-analyses/${id}`, data);
+  } catch (error) {
+    console.error(`Failed to update custom analysis ${id}:`, error);
+    throw error;
+  }
+};
+
+export const deleteCustomAnalysis = async (id) => {
+  try {
+    return await api.delete(`/custom-analyses/${id}`);
+  } catch (error) {
+    console.error(`Failed to delete custom analysis ${id}:`, error);
+    throw error;
+  }
+};
+
+export const extractCustomHeaders = async (formData) => {
+  try {
+    return await api.post('/custom-analyses/extract-headers/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  } catch (error) {
+    console.error('Failed to extract headers from file:', error);
+    throw error;
+  }
+};
+
+export const uploadCustom = async (formData) => {
+  try {
+    return await api.post('/upload/custom/', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  } catch (error) {
+    console.error('Failed to upload custom file:', error);
+    throw error;
+  }
+};
+
+export const getCustomFiles = async () => {
+  try {
+    return await api.get('/files/custom/');
+  } catch (error) {
+    console.error('Failed to fetch custom files:', error);
+    throw error;
+  }
+};
+
+export const analyzeCustomPairwise = async (data) => {
+  try {
+    return await api.post('/analyze/custom-pairwise/', data);
+  } catch (error) {
+    console.error('Failed to run custom pairwise analysis:', error);
+    throw error;
+  }
+};
+
+export const exportCustomReport = async (analysisId) => {
+  try {
+    return await api.get(`/export/custom/${analysisId}`, {
+      responseType: 'blob',
+    });
+  } catch (error) {
+    console.error('Failed to export custom report:', error);
+    throw error;
+  }
+};
+
 export default api;

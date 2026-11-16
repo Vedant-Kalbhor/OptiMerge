@@ -1,0 +1,55 @@
+[
+  {
+    "id": "8d21a097-a580-4476-be5b-54f5b2e382e4",
+    "name": "Test Analysis",
+    "description": "Created for end to end testing",
+    "identifier_column": "Part_Number",
+    "trigger_columns": [
+      "Part_Number",
+      "Length_mm",
+      "Hole_Diameter_mm",
+      "Thickness_mm",
+      "Material"
+    ],
+    "default_threshold": 75.0,
+    "columns": [
+      {
+        "name": "Part_Number",
+        "type": "exact_text",
+        "weight": 20.0,
+        "tolerance": null,
+        "included": true
+      },
+      {
+        "name": "Length_mm",
+        "type": "numeric_proximity",
+        "weight": 20.0,
+        "tolerance": null,
+        "included": true
+      },
+      {
+        "name": "Hole_Diameter_mm",
+        "type": "numeric_proximity",
+        "weight": 20.0,
+        "tolerance": null,
+        "included": true
+      },
+      {
+        "name": "Thickness_mm",
+        "type": "numeric_proximity",
+        "weight": 20.0,
+        "tolerance": null,
+        "included": true
+      },
+      {
+        "name": "Material",
+        "type": "exact_text",
+        "weight": 20.0,
+        "tolerance": null,
+        "included": true
+      }
+    ],
+    "created_at": "2026-11-13T11:19:51.059973",
+    "updated_at": "2026-11-13T11:19:51.059973"
+  }
+]

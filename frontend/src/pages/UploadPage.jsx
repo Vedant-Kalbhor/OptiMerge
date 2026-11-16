@@ -8,6 +8,8 @@ import {
   uploadBOMs,
   uploadPipes,
   uploadBends,
+  uploadCustom,
+  getCustomAnalyses,
   healthCheck
 } from '../services/api';
 import DrawingExtractorModal from '../components/DrawingExtractorModal';
@@ -58,6 +60,43 @@ const readHeadersFromFile = async (file) => {
 
 const detectUploadTarget = async (file) => {
   const headers = await readHeadersFromFile(file);
+
+  // 1. Check custom templates first
+  try {
+    const customTemplatesRes = await getCustomAnalyses();
+    const customTemplates = customTemplatesRes.data || [];
+    for (const tpl of customTemplates) {
+      const triggers = tpl.trigger_columns || [];
+      if (triggers.length > 0) {
+        const allTriggersMatch = triggers.every((trig) =>
+          headers.some((header) => {
+            const normTrig = normalizeHeader(trig);
+            return header === normTrig || header.includes(normTrig) || normTrig.includes(header);
+          })
+        );
+
+        if (allTriggersMatch) {
+          return {
+            type: 'custom',
+            label: tpl.name,
+            uploadFn: uploadCustom,
+            analysisState: {
+              type: 'custom',
+              templateId: tpl.id,
+              templateName: tpl.name,
+              threshold: tpl.default_threshold ?? 75,
+              fileName: file.name,
+              autoRun: true,
+              autoAnalysis: 'custom_pairwise'
+            }
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Could not check custom templates for upload:', err);
+  }
+
   const isBend = containsAll(headers, ['name','no of bends','development length']) && containsAny(headers, ['xa','xb','xc']);
   const isPipe = containsAll(headers, ['x axis', 'y axis', 'z axis', 'effective length']) && (containsAny(headers, ['if bends', 'bends']) || containsAny(headers, ['if straight', 'straight length']));
   const isBOM =
@@ -121,7 +160,7 @@ const detectUploadTarget = async (file) => {
   }
 
   throw new Error(
-    'Could not detect the file type from its columns. Please upload a valid weldment, BOM, or pipe template.'
+    'Could not detect the file type from its columns. Please upload a valid weldment, BOM, pipe, bend, or custom analysis template.'
   );
 };
 

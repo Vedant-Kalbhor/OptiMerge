@@ -26,6 +26,8 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import DimensionExtractionPage from './pages/DimensionExtractionPage';
 import BendResultsPage from './pages/BendResultsPage';
 import BendReplacementSuggestionPage from './pages/BendReplacementSuggestion';
+import CustomAnalysisPage from './pages/CustomAnalysisPage';
+import CustomResultsPage from './pages/CustomResultsPage';
 
 import EngineeringDrawingOCRPage from './pages/EngineeringDrawingOCRPage';
 
@@ -112,12 +114,14 @@ function App() {
                     <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
                     <Route path="/upload" element={<PrivateRoute><UploadPage /></PrivateRoute>} />
                     <Route path="/analysis" element={<PrivateRoute><AnalysisPage /></PrivateRoute>} />
+                    <Route path="/custom-analysis" element={<PrivateRoute><CustomAnalysisPage /></PrivateRoute>} />
                     <Route path="/results/clustering/:analysisId" element={<PrivateRoute><ClusteringResultsPage /></PrivateRoute>} />
                     <Route path="/results/bom/:analysisId" element={<PrivateRoute><BOMResultsPage /></PrivateRoute>} />
                     <Route path="/previous/:analysisId" element={<PrivateRoute><PreviousAnalysisPage /></PrivateRoute>} />
                     <Route path="/results/weldment/:analysisId" element={<PrivateRoute><WeldmentResultsPage /></PrivateRoute>} />
                     <Route path="/results/pipes/replacements/:analysisId" element={<PrivateRoute><PipeReplacementSuggestion /></PrivateRoute>} />
                     <Route path="/results/pipes/:analysisId" element={<PrivateRoute><PipesResultsPage /></PrivateRoute>} />
+                    <Route path="/results/custom/:analysisId" element={<PrivateRoute><CustomResultsPage /></PrivateRoute>} />
                     <Route path="/results/bom/compare/:bomA/:bomB" element={<PrivateRoute><BOMComparePage /></PrivateRoute>} />
                     <Route path="/results/bom/replacements" element={<PrivateRoute><BOMReplacementSuggestion /></PrivateRoute>} />
                     <Route path="/calculate-bom-savings/:analysisId" element={<PrivateRoute><BOMSavingsCalculator /></PrivateRoute>} />
